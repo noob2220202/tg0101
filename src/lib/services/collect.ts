@@ -12,6 +12,7 @@ import { DEFAULT_JOB_OPTIONS } from "../jobOptions";
  */
 
 export type RecordLinkInput = {
+  ownerId: string;
   link: ParsedLink;
   /** The room the link was advertised in. */
   sourceTargetId: string | null;
@@ -25,14 +26,17 @@ export type RecordLinkInput = {
  * link is advertised, which only grows over time.
  */
 export async function recordCollectedLink(input: RecordLinkInput, policy?: PolicyRow) {
-  const activePolicy = policy ?? (await getPolicy());
-  const { link, sourceTargetId, sourceLabel } = input;
+  const { ownerId, link, sourceTargetId, sourceLabel } = input;
+  const activePolicy = policy ?? (await getPolicy(ownerId));
 
   // Links we already track as targets are not news.
-  const existingTarget = await prisma.target.findUnique({ where: { key: link.key }, select: { id: true } });
+  const existingTarget = await prisma.target.findUnique({
+    where: { ownerId_key: { ownerId, key: link.key } },
+    select: { id: true },
+  });
 
   const existing = await prisma.collectedLink.findUnique({
-    where: { key: link.key },
+    where: { ownerId_key: { ownerId, key: link.key } },
     include: { sources: true },
   });
 
@@ -41,6 +45,7 @@ export async function recordCollectedLink(input: RecordLinkInput, policy?: Polic
   if (!existing) {
     const created = await prisma.collectedLink.create({
       data: {
+        ownerId,
         key: link.key,
         url: link.url,
         status: existingTarget ? "REGISTERED" : "PENDING",
@@ -92,9 +97,9 @@ async function countDistinctRooms(linkId: string, incomingSourceId: string | nul
 
 /** Recompute score/reason/status for one link. */
 export async function rescore(linkId: string, policy?: PolicyRow) {
-  const activePolicy = policy ?? (await getPolicy());
   const link = await prisma.collectedLink.findUnique({ where: { id: linkId } });
   if (!link) throw new Error("수집된 링크를 찾을 수 없습니다.");
+  const activePolicy = policy ?? (await getPolicy(link.ownerId));
 
   const result = scoreLink(
     {
@@ -130,6 +135,7 @@ export async function registerCollectedLink(linkId: string, joinAccountId?: stri
   if (link.status === "REGISTERED" && link.registeredTargetId) return null;
 
   const target = await upsertTarget({
+    ownerId: link.ownerId,
     key: link.key,
     title: link.title,
     entityType: link.entityType,
@@ -148,6 +154,7 @@ export async function registerCollectedLink(linkId: string, joinAccountId?: stri
     });
     if (!alreadyMember) {
       await createJoinJob({
+        ownerId: link.ownerId,
         accountId: joinAccountId,
         targetIds: [target.id],
         name: `자동 수집 1건`,
@@ -165,15 +172,14 @@ export async function registerCollectedLink(linkId: string, joinAccountId?: stri
  * Auto-register everything at or above the policy threshold, within today's
  * budget. Returns how many links were promoted.
  */
-export async function runAutoRegistration(): Promise<number> {
-  const policy = await getPolicy();
+export async function runAutoRegistration(policy: PolicyRow): Promise<number> {
   if (!policy.enabled || !policy.autoRegister) return 0;
 
   const budget = await remainingDailyBudget(policy);
   if (budget <= 0) return 0;
 
   const candidates = await prisma.collectedLink.findMany({
-    where: { status: "PENDING", score: { gte: policy.minScore } },
+    where: { ownerId: policy.ownerId, status: "PENDING", score: { gte: policy.minScore } },
     orderBy: { score: "desc" },
     take: budget,
   });

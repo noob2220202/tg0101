@@ -2,15 +2,18 @@ import { Prisma } from "@prisma/client";
 
 import { QueueList, QueueRow } from "@/components/QueueList";
 import { prisma } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 200;
 
 export default async function QueuePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  const user = await requireUser();
   const { status = "PENDING" } = await searchParams;
 
-  const where: Prisma.JoinTaskWhereInput = status === "ALL" ? {} : { status };
+  const scope: Prisma.JoinTaskWhereInput = { job: { ownerId: user.id } };
+  const where: Prisma.JoinTaskWhereInput = status === "ALL" ? scope : { ...scope, status };
 
   const [tasks, grouped] = await Promise.all([
     prisma.joinTask.findMany({
@@ -23,7 +26,7 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
         job: { select: { id: true, name: true } },
       },
     }),
-    prisma.joinTask.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.joinTask.groupBy({ by: ["status"], where: scope, _count: { _all: true } }),
   ]);
 
   const counts: Record<string, number> = { ALL: 0 };

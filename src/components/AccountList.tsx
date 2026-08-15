@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 
 import { CheckboxField, ErrorNote, Modal } from "./Modal";
 import { Badge } from "./ui";
+import Link from "next/link";
+
 import { apiRequest } from "@/lib/client/api";
 import { absoluteTime, relativeTime } from "@/lib/format";
+import { riskLabel } from "@/lib/health";
 import { ACCOUNT_STATUS_LABEL, AccountStatus } from "@/lib/enums";
 
 export type AccountRow = {
@@ -23,6 +26,9 @@ export type AccountRow = {
   lastJoinAt: string | null;
   joinedRooms: number;
   pendingTasks: number;
+  riskScore: number | null;
+  riskReason: string | null;
+  spamStatus: string | null;
 };
 
 const TONE: Record<string, "neutral" | "ok" | "bad" | "wait"> = {
@@ -84,6 +90,7 @@ export function AccountList({ accounts, mockMode }: { accounts: AccountRow[]; mo
             <tr className="border-b border-line">
               <th className="th">계정</th>
               <th className="th w-[10%]">상태</th>
+              <th className="th w-[12%]">건강도</th>
               <th className="th w-[12%]">페이싱</th>
               <th className="th w-[10%]">입장한 방</th>
               <th className="th w-[10%]">대기 작업</th>
@@ -94,7 +101,7 @@ export function AccountList({ accounts, mockMode }: { accounts: AccountRow[]; mo
           <tbody>
             {accounts.length === 0 ? (
               <tr>
-                <td colSpan={7} className="td py-12 text-center text-ink-faint">
+                <td colSpan={8} className="td py-12 text-center text-ink-faint">
                   연결된 계정이 없습니다. “계정 연결”로 시작하세요.
                 </td>
               </tr>
@@ -102,7 +109,9 @@ export function AccountList({ accounts, mockMode }: { accounts: AccountRow[]; mo
               accounts.map((account) => (
                 <tr key={account.id} className="border-b border-line last:border-0">
                   <td className="td">
-                    <p className="font-medium">{account.label}</p>
+                    <Link href={`/accounts/${account.id}`} className="font-medium hover:underline">
+                      {account.label}
+                    </Link>
                     <p className="mt-0.5 text-ink-muted">
                       {account.phone ?? "번호 미등록"}
                       {account.collectEnabled ? " · 링크 수집 켜짐" : ""}
@@ -119,6 +128,19 @@ export function AccountList({ accounts, mockMode }: { accounts: AccountRow[]; mo
                       </p>
                     ) : null}
                   </td>
+                  <td className="td">
+                    {account.riskScore === null ? (
+                      <span className="text-ink-faint">-</span>
+                    ) : (
+                      <span title={account.riskReason ?? undefined}>
+                        <Badge tone={riskLabel(account.riskScore).tone}>{riskLabel(account.riskScore).label}</Badge>
+                        <span className="tnum ml-1.5 text-ink-muted">{account.riskScore}</span>
+                      </span>
+                    )}
+                    {account.spamStatus === "LIMITED" ? (
+                      <p className="mt-0.5 text-[11px] text-bad">스팸 제한</p>
+                    ) : null}
+                  </td>
                   <td className="td text-ink-muted">
                     {account.joinIntervalSec}초 간격
                     <br />
@@ -131,6 +153,9 @@ export function AccountList({ accounts, mockMode }: { accounts: AccountRow[]; mo
                   </td>
                   <td className="td">
                     <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <Link href={`/accounts/${account.id}`} className="btn">
+                        프로필
+                      </Link>
                       {account.status === "COOLDOWN" ? (
                         <button
                           type="button"

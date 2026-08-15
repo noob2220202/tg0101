@@ -1,20 +1,25 @@
 import { AccountList, AccountRow } from "@/components/AccountList";
 import { prisma } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
 import { isMockMode } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountsPage() {
+  const user = await requireUser();
+
   const accounts = await prisma.account.findMany({
+    where: { ownerId: user.id },
     orderBy: { createdAt: "asc" },
     include: {
       _count: { select: { memberships: true } },
+      health: true,
     },
   });
 
   const pendingCounts = await prisma.joinTask.groupBy({
     by: ["accountId"],
-    where: { status: "PENDING" },
+    where: { status: "PENDING", account: { ownerId: user.id } },
     _count: { _all: true },
   });
   const pendingMap = new Map(pendingCounts.map((row) => [row.accountId, row._count._all]));
@@ -33,6 +38,9 @@ export default async function AccountsPage() {
     lastJoinAt: account.lastJoinAt?.toISOString() ?? null,
     joinedRooms: account._count.memberships,
     pendingTasks: pendingMap.get(account.id) ?? 0,
+    riskScore: account.health?.riskScore ?? null,
+    riskReason: account.health?.riskReason ?? null,
+    spamStatus: account.health?.spamStatus ?? null,
   }));
 
   return (

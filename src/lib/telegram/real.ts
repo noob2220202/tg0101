@@ -3,6 +3,16 @@ import { Api, Logger, sessions, TelegramClient } from "teleproto";
 import { entityTypeOf, kindOfKey } from "../links";
 import { toTelegramError } from "./errors";
 import { JoinResult, MessageLite, ResolvedEntity, TelegramError, TelegramSession } from "./types";
+import type {
+  AuthorizationInfo,
+  ChatCapableSession,
+  ChatMessageDto,
+  DialogSummary,
+  OwnProfile,
+  ProfileUpdate,
+  SpamCheckResult,
+} from "./chatTypes";
+import * as chat from "./realChat";
 
 /** Telegram's "mute forever" sentinel. */
 const MUTE_FOREVER = 2147483647;
@@ -19,7 +29,7 @@ export type RealSessionOptions = {
  * A live MTProto session. One instance per account; the worker keeps it warm
  * between tasks so we are not re-handshaking on every join.
  */
-export class RealTelegramSession implements TelegramSession {
+export class RealTelegramSession implements TelegramSession, ChatCapableSession {
   readonly accountId: string;
   private client: TelegramClient;
   private connected = false;
@@ -299,6 +309,84 @@ export class RealTelegramSession implements TelegramSession {
     } catch (err) {
       throw toTelegramError(err);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Chat & profile — delegated to ./realChat so this class stays about joining
+  // -------------------------------------------------------------------------
+
+  async listDialogs(limit: number, archived: boolean): Promise<DialogSummary[]> {
+    await this.connect();
+    return chat.listDialogs(this.client, limit, archived);
+  }
+
+  async getHistory(peerId: string, limit: number, offsetId?: number): Promise<ChatMessageDto[]> {
+    await this.connect();
+    return chat.getHistory(this.client, peerId, limit, offsetId);
+  }
+
+  async sendChatMessage(peerId: string, text: string): Promise<ChatMessageDto> {
+    await this.connect();
+    return chat.sendChatMessage(this.client, peerId, text);
+  }
+
+  async markRead(peerId: string, maxId?: number): Promise<void> {
+    await this.connect();
+    return chat.markRead(this.client, peerId, maxId);
+  }
+
+  async downloadMedia(peerId: string, messageId: number) {
+    await this.connect();
+    return chat.downloadMedia(this.client, this.accountId, peerId, messageId);
+  }
+
+  async getProfile(): Promise<OwnProfile> {
+    await this.connect();
+    return chat.getProfile(this.client);
+  }
+
+  async updateProfile(update: ProfileUpdate): Promise<OwnProfile> {
+    await this.connect();
+    return chat.updateProfile(this.client, update);
+  }
+
+  async updateUsername(username: string): Promise<OwnProfile> {
+    await this.connect();
+    return chat.updateUsername(this.client, username);
+  }
+
+  async setProfilePhoto(file: Buffer, fileName: string): Promise<void> {
+    await this.connect();
+    return chat.setProfilePhoto(this.client, file, fileName);
+  }
+
+  async deleteProfilePhoto(): Promise<void> {
+    await this.connect();
+    return chat.deleteProfilePhoto(this.client);
+  }
+
+  async downloadOwnPhoto() {
+    await this.connect();
+    return chat.downloadOwnPhoto(this.client, this.accountId);
+  }
+
+  async listAuthorizations(): Promise<AuthorizationInfo[]> {
+    await this.connect();
+    return chat.listAuthorizations(this.client);
+  }
+
+  async resetAuthorization(hash: string): Promise<void> {
+    await this.connect();
+    return chat.resetAuthorization(this.client, hash);
+  }
+
+  async checkSpamStatus(): Promise<SpamCheckResult> {
+    await this.connect();
+    return chat.checkSpamStatus(this.client);
+  }
+
+  onNewMessage(handler: (message: ChatMessageDto) => void): () => void {
+    return chat.onNewMessage(this.client, handler);
   }
 
   async listJoined(): Promise<ResolvedEntity[]> {

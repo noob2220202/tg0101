@@ -4,7 +4,7 @@ import { readWorkerHeartbeat } from "./settings";
 
 /** Every query behind the dashboard, in one place. */
 
-export async function getDashboardData() {
+export async function getDashboardData(ownerId: string) {
   const now = new Date();
   const today = startOfToday(now);
 
@@ -23,25 +23,25 @@ export async function getDashboardData() {
     watchedRooms,
   ] = await Promise.all([
     // 오늘 입장 완료 — 자정 기준 누적
-    prisma.joinTask.count({ where: { status: "SUCCESS", finishedAt: { gte: today } } }),
+    prisma.joinTask.count({ where: { job: { ownerId }, status: "SUCCESS", finishedAt: { gte: today } } }),
 
     // 대기 중 작업
-    prisma.joinTask.count({ where: { status: { in: ["PENDING", "RUNNING"] }, job: { status: "RUNNING" } } }),
+    prisma.joinTask.count({ where: { status: { in: ["PENDING", "RUNNING"] }, job: { ownerId, status: "RUNNING" } } }),
 
     // 승인 대기 — 관리자 수락 필요
-    prisma.joinTask.count({ where: { status: "WAITING_APPROVAL" } }),
+    prisma.joinTask.count({ where: { job: { ownerId }, status: "WAITING_APPROVAL" } }),
 
     // 실패 — 재시도 가능
-    prisma.joinTask.count({ where: { status: "FAILED" } }),
+    prisma.joinTask.count({ where: { job: { ownerId }, status: "FAILED" } }),
 
     prisma.account.findMany({
-      where: { status: "COOLDOWN" },
+      where: { ownerId, status: "COOLDOWN" },
       orderBy: { cooldownUntil: "asc" },
       select: { id: true, label: true, cooldownUntil: true, cooldownSeconds: true, cooldownReason: true },
     }),
 
     prisma.joinJob.findMany({
-      where: { status: { in: ["RUNNING", "PAUSED"] } },
+      where: { ownerId, status: { in: ["RUNNING", "PAUSED"] } },
       orderBy: { createdAt: "desc" },
       take: 12,
       include: {
@@ -50,20 +50,21 @@ export async function getDashboardData() {
     }),
 
     prisma.joinLog.findMany({
+      where: { account: { ownerId } },
       orderBy: { createdAt: "desc" },
       take: 24,
       include: { account: { select: { label: true } } },
     }),
 
-    prisma.account.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.account.groupBy({ by: ["status"], where: { ownerId }, _count: { _all: true } }),
 
-    prisma.collectedLink.count({ where: { status: "PENDING" } }),
+    prisma.collectedLink.count({ where: { ownerId, status: "PENDING" } }),
 
-    prisma.collectedLink.count({ where: { status: "REGISTERED", lastSeenAt: { gte: today } } }),
+    prisma.collectedLink.count({ where: { ownerId, status: "REGISTERED", lastSeenAt: { gte: today } } }),
 
     readWorkerHeartbeat(),
 
-    prisma.roomScan.count(),
+    prisma.roomScan.count({ where: { account: { ownerId } } }),
   ]);
 
   // Pending task counts per cooling-down account, for the wait table.
@@ -123,20 +124,20 @@ export async function getDashboardData() {
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
 
 /** Header numbers for the 수집된 링크 screen. */
-export async function getCollectionSummary() {
+export async function getCollectionSummary(ownerId: string) {
   const [collectingAccounts, watchedRooms, scannedRooms, lastScan, counts] = await Promise.all([
     prisma.account.findMany({
-      where: { collectEnabled: true, status: { not: "DISABLED" } },
+      where: { ownerId, collectEnabled: true, status: { not: "DISABLED" } },
       select: { label: true },
     }),
-    prisma.roomScan.count(),
-    prisma.roomScan.count({ where: { scanCount: { gt: 0 } } }),
+    prisma.roomScan.count({ where: { account: { ownerId } } }),
+    prisma.roomScan.count({ where: { account: { ownerId }, scanCount: { gt: 0 } } }),
     prisma.roomScan.findFirst({
-      where: { nextScanAt: { not: undefined } },
+      where: { account: { ownerId } },
       orderBy: { nextScanAt: "asc" },
       select: { nextScanAt: true },
     }),
-    prisma.collectedLink.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.collectedLink.groupBy({ by: ["status"], where: { ownerId }, _count: { _all: true } }),
   ]);
 
   const byStatus = (status: string) => counts.find((c) => c.status === status)?._count._all ?? 0;

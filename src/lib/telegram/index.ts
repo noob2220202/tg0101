@@ -3,7 +3,10 @@ import { decryptSession } from "./crypto";
 import { MockTelegramSession } from "./mock";
 import { TelegramError, TelegramSession } from "./types";
 
+import { ChatCapableSession } from "./chatTypes";
+
 export * from "./types";
+export * from "./chatTypes";
 export { encryptSession, decryptSession } from "./crypto";
 export { toTelegramError } from "./errors";
 
@@ -59,6 +62,18 @@ export async function getSession(accountId: string): Promise<TelegramSession> {
 
   pool.set(accountId, session);
   return session;
+}
+
+/**
+ * The chat/profile face of a session.
+ *
+ * The real implementation is the session itself; the mock keeps that behaviour
+ * in a companion object so the join-side fake stays small.
+ */
+export async function getChatSession(accountId: string): Promise<ChatCapableSession> {
+  const session = await getSession(accountId);
+  if (session instanceof MockTelegramSession) return session.chat;
+  return session as unknown as ChatCapableSession;
 }
 
 export async function dropSession(accountId: string): Promise<void> {

@@ -4,6 +4,8 @@ import { trimLogs } from "../lib/services/logs";
 import { recordWorkerTick } from "../lib/services/settings";
 import { eligibleAccountIds, nextTaskFor, runTask } from "./joinRunner";
 import { runCollectorTick, syncRoomScans } from "./collector";
+import { runHealthChecks } from "./health";
+import { startGateway } from "../gateway/server";
 
 /**
  * The worker process.
@@ -58,6 +60,7 @@ export async function tick(): Promise<number> {
   if (tickCount % HOUSEKEEPING_EVERY_TICKS === 0) {
     await syncRoomScans().catch(() => 0);
     await trimLogs().catch(() => 0);
+    await runHealthChecks().catch((err) => log(`health: ${(err as Error).message}`));
   }
 
   return executed;
@@ -67,6 +70,10 @@ async function main(): Promise<void> {
   const once = process.argv.includes("--once");
 
   log(`worker starting — tick=${TICK_SECONDS}s mock=${isMockMode() ? "on" : "off"}`);
+
+  // The worker owns every MTProto session, so it is also the only process that
+  // can serve chat. A single --once run skips it: nothing would connect.
+  if (!once) startGateway();
   await syncRoomScans().catch((err) => log(`syncRoomScans: ${(err as Error).message}`));
 
   if (once) {

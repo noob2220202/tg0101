@@ -2,7 +2,7 @@ import { prisma } from "../lib/db";
 import { getSession } from "../lib/telegram";
 import { toTelegramError } from "../lib/telegram/errors";
 import { rescore, runAutoRegistration } from "../lib/services/collect";
-import { getPolicy } from "../lib/services/policy";
+import { allPolicies, PolicyRow } from "../lib/services/policy";
 import { writeLog } from "../lib/services/logs";
 import { collectFromRoom, nextScanTime } from "./joinRunner";
 
@@ -27,13 +27,18 @@ const RESOLVES_PER_TICK = 5;
  * swept in turn — with it off, collection stops at the manually curated set.
  */
 export async function syncRoomScans(): Promise<number> {
-  const policy = await getPolicy();
-  if (!policy.enabled) return 0;
+  let created = 0;
+  for (const policy of await allPolicies()) {
+    created += await syncRoomScansFor(policy);
+  }
+  return created;
+}
 
+async function syncRoomScansFor(policy: PolicyRow): Promise<number> {
   const memberships = await prisma.membership.findMany({
     where: {
       left: false,
-      account: { collectEnabled: true, status: { not: "DISABLED" } },
+      account: { ownerId: policy.ownerId, collectEnabled: true, status: { not: "DISABLED" } },
       ...(policy.chainCollect ? {} : { target: { source: "MANUAL" } }),
     },
     select: { accountId: true, targetId: true },
@@ -61,13 +66,18 @@ export async function syncRoomScans(): Promise<number> {
 
 /** Sweep a few due rooms. Returns how many links were recorded. */
 export async function runCollectorTick(now = new Date()): Promise<number> {
-  const policy = await getPolicy();
-  if (!policy.enabled) return 0;
+  let collected = 0;
+  for (const policy of await allPolicies()) {
+    collected += await collectForPolicy(policy, now);
+  }
+  return collected;
+}
 
+async function collectForPolicy(policy: PolicyRow, now: Date): Promise<number> {
   const due = await prisma.roomScan.findMany({
     where: {
       nextScanAt: { lte: now },
-      account: { status: "ACTIVE", collectEnabled: true },
+      account: { ownerId: policy.ownerId, status: "ACTIVE", collectEnabled: true },
       ...(policy.chainCollect ? {} : { target: { source: "MANUAL" } }),
     },
     orderBy: { nextScanAt: "asc" },
@@ -83,7 +93,7 @@ export async function runCollectorTick(now = new Date()): Promise<number> {
       const label = scan.target.title ?? scan.target.key;
       const found = await collectFromRoom(
         session,
-        scan.accountId,
+        policy.ownerId,
         scan.targetId,
         scan.target.key,
         label,
@@ -130,8 +140,8 @@ export async function runCollectorTick(now = new Date()): Promise<number> {
     }
   }
 
-  await resolvePendingLinks();
-  await runAutoRegistration();
+  await resolvePendingLinks(policy);
+  await runAutoRegistration(policy);
   return collected;
 }
 
@@ -143,19 +153,16 @@ export async function runCollectorTick(now = new Date()): Promise<number> {
  * auto-registered. Resolving fills in the title, entity type and member count,
  * then re-scores against the current policy.
  */
-export async function resolvePendingLinks(): Promise<number> {
-  const policy = await getPolicy();
-  if (!policy.enabled) return 0;
-
+export async function resolvePendingLinks(policy: PolicyRow): Promise<number> {
   const account = await prisma.account.findFirst({
-    where: { status: "ACTIVE", collectEnabled: true },
+    where: { ownerId: policy.ownerId, status: "ACTIVE", collectEnabled: true },
     orderBy: { lastCollectAt: "asc" },
     select: { id: true },
   });
   if (!account) return 0;
 
   const links = await prisma.collectedLink.findMany({
-    where: { resolvedAt: null, status: "PENDING" },
+    where: { ownerId: policy.ownerId, resolvedAt: null, status: "PENDING" },
     orderBy: [{ roomCount: "desc" }, { firstSeenAt: "asc" }],
     take: RESOLVES_PER_TICK,
   });

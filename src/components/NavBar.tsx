@@ -1,19 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
+
+import { apiRequest } from "@/lib/client/api";
 
 const LINKS = [
   { href: "/", label: "대시보드" },
+  { href: "/chat", label: "채팅" },
+  { href: "/keywords", label: "키워드" },
   { href: "/groups", label: "그룹 목록" },
   { href: "/queue", label: "큐" },
   { href: "/collected", label: "수집된 링크" },
   { href: "/accounts", label: "계정" },
 ];
 
-export function NavBar() {
+export function NavBar({ user }: { user: { name: string; email: string } | null }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  // The login screen is its own world.
+  if (!user) return null;
+
+  async function signOut() {
+    await apiRequest("/api/auth/login", { method: "DELETE" }).catch(() => {});
+    router.replace("/login");
+    router.refresh();
+  }
 
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-card/90 backdrop-blur">
@@ -39,6 +53,15 @@ export function NavBar() {
             );
           })}
         </nav>
+
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-[12px] text-ink-muted" title={user.email}>
+            {user.name}
+          </span>
+          <button type="button" onClick={signOut} className="btn-ghost rounded-md px-2 py-1 text-[12px]">
+            로그아웃
+          </button>
+        </div>
       </div>
     </header>
   );

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { handleError, fail, ok } from "@/lib/apiResponse";
+import { requireUser } from "@/lib/auth/session";
 import { dropSession } from "@/lib/telegram";
 
 const patchSchema = z.object({
@@ -16,9 +17,13 @@ const patchSchema = z.object({
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const user = await requireUser();
     const { id } = await params;
     const body = patchSchema.parse(await request.json());
     const { clearCooldown, ...rest } = body;
+
+    const owned = await prisma.account.findFirst({ where: { id, ownerId: user.id }, select: { id: true } });
+    if (!owned) return fail("계정을 찾을 수 없습니다.", 404);
 
     const account = await prisma.account.update({
       where: { id },
@@ -41,7 +46,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const user = await requireUser();
     const { id } = await params;
+
+    const owned = await prisma.account.findFirst({ where: { id, ownerId: user.id }, select: { id: true } });
+    if (!owned) return fail("계정을 찾을 수 없습니다.", 404);
 
     const openTasks = await prisma.joinTask.count({
       where: { accountId: id, status: { in: ["PENDING", "RUNNING"] } },

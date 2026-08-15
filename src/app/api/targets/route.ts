@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { handleError, ok } from "@/lib/apiResponse";
+import { requireUser } from "@/lib/auth/session";
 import { importLinks } from "@/lib/services/targets";
 
 const importSchema = z.object({
@@ -11,8 +12,9 @@ const importSchema = z.object({
 /** Bulk-import pasted links — the "행 추가" flow on the group list. */
 export async function POST(request: Request) {
   try {
+    const user = await requireUser();
     const { links } = importSchema.parse(await request.json());
-    const result = await importLinks(links, "MANUAL");
+    const result = await importLinks(user.id, links, "MANUAL");
     return ok(result, 201);
   } catch (err) {
     return handleError(err);
@@ -27,9 +29,11 @@ const patchSchema = z.object({
 /** Archive or unarchive rows so the working list stays short. */
 export async function PATCH(request: Request) {
   try {
+    const user = await requireUser();
     const { targetIds, archived } = patchSchema.parse(await request.json());
     const { count } = await prisma.target.updateMany({
-      where: { id: { in: targetIds } },
+      // The ownerId predicate is what stops one operator editing another's rows.
+      where: { id: { in: targetIds }, ownerId: user.id },
       data: { archived },
     });
     return ok({ count });

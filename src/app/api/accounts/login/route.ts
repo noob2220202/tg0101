@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { handleError, ok } from "@/lib/apiResponse";
+import { requireUser } from "@/lib/auth/session";
 import { cancelLogin, startLogin, submitLoginValue } from "@/lib/telegram/login";
 
 // The login conversation holds an open MTProto connection in module state, so
@@ -40,6 +41,7 @@ const bodySchema = z.discriminatedUnion("action", [startSchema, submitSchema, ca
  */
 export async function POST(request: Request) {
   try {
+    const user = await requireUser();
     const body = bodySchema.parse(await request.json());
 
     if (body.action === "cancel") {
@@ -48,7 +50,9 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "start") {
-      const existing = await prisma.account.findUnique({ where: { label: body.label } });
+      const existing = await prisma.account.findUnique({
+        where: { ownerId_label: { ownerId: user.id, label: body.label } },
+      });
       if (existing) throw new Error("같은 이름의 계정이 이미 있습니다.");
 
       const result = await startLogin(body.phone, body.label);
@@ -64,6 +68,7 @@ export async function POST(request: Request) {
 
     const account = await prisma.account.create({
       data: {
+        ownerId: user.id,
         label: result.label,
         phone: result.phone,
         sessionString: result.sessionString,

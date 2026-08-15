@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { GroupList, GroupRow } from "@/components/GroupList";
 import { prisma } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +13,12 @@ export default async function GroupsPage({
 }: {
   searchParams: Promise<{ q?: string; archived?: string }>;
 }) {
+  const user = await requireUser();
   const { q = "", archived } = await searchParams;
   const includeArchived = archived === "1";
 
   const where: Prisma.TargetWhereInput = {
+    ownerId: user.id,
     ...(includeArchived ? {} : { archived: false }),
     ...(q
       ? {
@@ -44,7 +47,7 @@ export default async function GroupsPage({
     }),
     prisma.target.count({ where }),
     prisma.account.findMany({
-      where: { status: { in: ["ACTIVE", "COOLDOWN"] } },
+      where: { ownerId: user.id, status: { in: ["ACTIVE", "COOLDOWN"] } },
       orderBy: { label: "asc" },
       select: { id: true, label: true, joinIntervalSec: true },
     }),

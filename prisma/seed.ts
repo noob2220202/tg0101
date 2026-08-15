@@ -1,16 +1,21 @@
 import { PrismaClient } from "@prisma/client";
 
 import { DEFAULT_JOB_OPTIONS, serializeJobOptions } from "../src/lib/jobOptions";
+import { hashPassword } from "../src/lib/auth/password";
+import { defaultPolicyData } from "../src/lib/services/policy";
 
 /**
  * Development seed.
  *
- * Creates two accounts, a batch of targets and one queued job so the worker has
- * something to chew on. Intended to be run with MOCK_TELEGRAM=1 — the accounts
- * have no real session and cannot talk to Telegram.
+ * Creates one operator, two Telegram accounts, a batch of targets and a queued
+ * job so the worker has something to chew on. Intended to be run with
+ * MOCK_TELEGRAM=1 — the accounts have no real session.
  */
 
 const prisma = new PrismaClient();
+
+const SEED_EMAIL = process.env.SEED_EMAIL ?? "admin@example.com";
+const SEED_PASSWORD = process.env.SEED_PASSWORD ?? "changeme123";
 
 const SAMPLE_KEYS = [
   "freepromo_kr",
@@ -38,26 +43,27 @@ const SAMPLE_KEYS = [
 async function main() {
   console.log("seeding…");
 
-  const policy = await prisma.collectionPolicy.upsert({
-    where: { id: "default" },
+  const owner = await prisma.user.upsert({
+    where: { email: SEED_EMAIL },
     create: {
-      id: "default",
-      requiredKeywords: "자유홍보방, 광고, 구인구직, 총판, 토토, 본사",
-      minScore: 70,
-      dailyLimit: 100,
+      email: SEED_EMAIL,
+      name: "관리자",
+      role: "ADMIN",
+      passwordHash: await hashPassword(SEED_PASSWORD),
+      policy: { create: defaultPolicyData() },
     },
     update: {},
   });
 
   const main = await prisma.account.upsert({
-    where: { label: "산타산타" },
-    create: { label: "산타산타", phone: "+821000000001", status: "ACTIVE", joinIntervalSec: 20 },
+    where: { ownerId_label: { ownerId: owner.id, label: "산타산타" } },
+    create: { ownerId: owner.id, label: "산타산타", phone: "+821000000001", status: "ACTIVE", joinIntervalSec: 20 },
     update: { status: "ACTIVE" },
   });
 
   const secondary = await prisma.account.upsert({
-    where: { label: "산타홍보용" },
-    create: { label: "산타홍보용", phone: "+821000000002", status: "ACTIVE", joinIntervalSec: 30 },
+    where: { ownerId_label: { ownerId: owner.id, label: "산타홍보용" } },
+    create: { ownerId: owner.id, label: "산타홍보용", phone: "+821000000002", status: "ACTIVE", joinIntervalSec: 30 },
     update: { status: "ACTIVE" },
   });
 
@@ -65,19 +71,19 @@ async function main() {
   for (const key of SAMPLE_KEYS) {
     targets.push(
       await prisma.target.upsert({
-        where: { key },
-        create: { key, source: "MANUAL" },
+        where: { ownerId_key: { ownerId: owner.id, key } },
+        create: { ownerId: owner.id, key, source: "MANUAL" },
         update: {},
       }),
     );
   }
 
-  // One batch for the primary account, so the worker starts with work to do.
   const existingJob = await prisma.joinJob.findFirst({ where: { accountId: main.id } });
   if (!existingJob) {
     await prisma.joinJob.create({
       data: {
         name: `${targets.length}개 방 입장`,
+        ownerId: owner.id,
         accountId: main.id,
         status: "RUNNING",
         options: serializeJobOptions({ ...DEFAULT_JOB_OPTIONS, autoCollect: true }),
@@ -93,9 +99,16 @@ async function main() {
     });
   }
 
-  console.log(
-    `done — accounts: ${main.label}, ${secondary.label} · targets: ${targets.length} · policy minScore ${policy.minScore}`,
-  );
+  // A keyword rule so the chat stream has something to match on.
+  const ruleExists = await prisma.keywordRule.findFirst({ where: { ownerId: owner.id } });
+  if (!ruleExists) {
+    await prisma.keywordRule.create({
+      data: { ownerId: owner.id, name: "구인·총판 감시", terms: "구인, 구직, 총판, 본사" },
+    });
+  }
+
+  console.log(`done — 로그인: ${SEED_EMAIL} / ${SEED_PASSWORD}`);
+  console.log(`accounts: ${main.label}, ${secondary.label} · targets: ${targets.length}`);
 }
 
 main()

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { Badge, Card, CardHeader, EmptyState, LevelDot, Progress, StatCell } from "@/components/ui";
 import { getDashboardData } from "@/lib/services/stats";
+import { requireUser } from "@/lib/auth/session";
 import { absoluteTime, formatNumber, relativeTime } from "@/lib/format";
 import { JOB_STATUS_LABEL, JobStatus } from "@/lib/enums";
 
@@ -9,7 +10,8 @@ import { JOB_STATUS_LABEL, JobStatus } from "@/lib/enums";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const data = await getDashboardData();
+  const user = await requireUser();
+  const data = await getDashboardData(user.id);
   const { stats, cooldownAccounts, runningJobs, recentLogs, accounts, collection, heartbeat, now } = data;
 
   return (

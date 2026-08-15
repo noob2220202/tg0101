@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { prisma } from "@/lib/db";
-import { handleError, ok } from "@/lib/apiResponse";
+import { fail, handleError, ok } from "@/lib/apiResponse";
+import { requireUser } from "@/lib/auth/session";
 import { refreshJobProgress } from "@/lib/services/jobs";
 
 const bodySchema = z.object({
@@ -12,16 +13,19 @@ const bodySchema = z.object({
 /** Retry failed joins, or drop queued ones. */
 export async function POST(request: Request) {
   try {
+    const user = await requireUser();
     const { taskIds, action } = bodySchema.parse(await request.json());
 
     const tasks = await prisma.joinTask.findMany({
-      where: { id: { in: taskIds } },
+      where: { id: { in: taskIds }, job: { ownerId: user.id } },
       select: { id: true, jobId: true, status: true },
     });
+    if (tasks.length === 0) return fail("선택한 작업을 찾을 수 없습니다.", 404);
+    const ownedIds = tasks.map((t) => t.id);
 
     if (action === "retry") {
       await prisma.joinTask.updateMany({
-        where: { id: { in: taskIds }, status: { in: ["FAILED", "SKIPPED", "WAITING_APPROVAL"] } },
+        where: { id: { in: ownedIds }, status: { in: ["FAILED", "SKIPPED", "WAITING_APPROVAL"] } },
         data: { status: "PENDING", attempts: 0, nextAttemptAt: new Date(), lastError: null, lastErrorCode: null },
       });
 
@@ -33,7 +37,7 @@ export async function POST(request: Request) {
       });
     } else {
       await prisma.joinTask.updateMany({
-        where: { id: { in: taskIds }, status: "PENDING" },
+        where: { id: { in: ownedIds }, status: "PENDING" },
         data: { status: "SKIPPED", lastError: "사용자가 취소했습니다." },
       });
     }

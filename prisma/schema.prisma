@@ -14,6 +14,47 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
+// Operators (tenants)
+// ---------------------------------------------------------------------------
+
+/// A person who signs in to the console. Every Telegram account, target and
+/// collected link belongs to exactly one of these.
+model User {
+  id           String @id @default(cuid())
+  email        String @unique
+  passwordHash String
+  name         String
+
+  /// ADMIN | MEMBER — see UserRole. Admins may manage other operators.
+  role String @default("MEMBER")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions       UserSession[]
+  accounts       Account[]
+  targets        Target[]
+  jobs           JoinJob[]
+  collectedLinks CollectedLink[]
+  policy         CollectionPolicy?
+}
+
+/// A signed-in browser session. The cookie holds `token`; nothing else.
+model UserSession {
+  id    String @id @default(cuid())
+  token String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
 // Accounts
 // ---------------------------------------------------------------------------
 
@@ -21,17 +62,27 @@ datasource db {
 /// MTProto StringSession.
 model Account {
   id            String  @id @default(cuid())
-  label         String  @unique
+  label         String
   phone         String?
   sessionString String?
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  /// Cached Telegram profile, refreshed whenever the gateway connects.
+  firstName      String?
+  lastName       String?
+  username       String?
+  about          String?
+  photoUpdatedAt DateTime?
 
   /// ACTIVE | COOLDOWN | NEEDS_CHECK | DISABLED — see AccountStatus.
   status String @default("NEEDS_CHECK")
 
   /// Telegram-imposed wait ("텔레그램이 51966초 대기를 요구했습니다").
-  cooldownUntil    DateTime?
-  cooldownSeconds  Int?
-  cooldownReason   String?
+  cooldownUntil   DateTime?
+  cooldownSeconds Int?
+  cooldownReason  String?
 
   /// Pacing: minimum seconds between two joins on this account.
   joinIntervalSec Int @default(20)
@@ -53,7 +104,11 @@ model Account {
   memberships Membership[]
   roomScans   RoomScan[]
   policies    CollectionPolicy[]
+  dialogs     Dialog[]
+  messages    ChatMessage[]
+  health      AccountHealth?
 
+  @@unique([ownerId, label])
   @@index([status])
 }
 
@@ -65,7 +120,10 @@ model Account {
 /// username (`somegroup`) or a private invite hash (`+AbCdEf...`).
 model Target {
   id  String @id @default(cuid())
-  key String @unique
+  key String
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   /// PUBLIC | PRIVATE — see TargetKind.
   kind        String  @default("PUBLIC")
@@ -85,8 +143,8 @@ model Target {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  prerequisites Prerequisite[] @relation("TargetPrerequisites")
-  requiredBy    Prerequisite[] @relation("PrerequisiteOf")
+  prerequisites Prerequisite[]        @relation("TargetPrerequisites")
+  requiredBy    Prerequisite[]        @relation("PrerequisiteOf")
   tasks         JoinTask[]
   memberships   Membership[]
   logs          JoinLog[]
@@ -94,6 +152,7 @@ model Target {
   collectedFrom CollectedLinkSource[]
   collectedLink CollectedLink?
 
+  @@unique([ownerId, key])
   @@index([archived])
   @@index([source])
 }
@@ -144,6 +203,9 @@ model Membership {
 model JoinJob {
   id   String  @id @default(cuid())
   name String?
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   accountId String
   account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -244,10 +306,10 @@ model RoomScan {
   targetId String
   target   Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
 
-  lastScanAt      DateTime?
-  lastMessageId   Int?
-  scanCount       Int       @default(0)
-  nextScanAt      DateTime  @default(now())
+  lastScanAt    DateTime?
+  lastMessageId Int?
+  scanCount     Int       @default(0)
+  nextScanAt    DateTime  @default(now())
 
   @@unique([accountId, targetId])
   @@index([nextScanAt])
@@ -256,14 +318,17 @@ model RoomScan {
 /// A t.me link harvested from a room we are already in.
 model CollectedLink {
   id  String @id @default(cuid())
-  key String @unique
+  key String
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   url         String
   title       String?
   description String?
 
   /// GROUP | CHANNEL | BOT | USER | UNKNOWN — resolved against Telegram.
-  entityType  String  @default("UNKNOWN")
+  entityType  String @default("UNKNOWN")
   memberCount Int?
 
   /// 0-100 confidence that this is a joinable promo room.
@@ -278,8 +343,8 @@ model CollectedLink {
   roomCount Int @default(0)
   seenCount Int @default(0)
 
-  firstSeenAt DateTime @default(now())
-  lastSeenAt  DateTime @default(now())
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
   resolvedAt  DateTime?
 
   registeredTargetId String? @unique
@@ -287,6 +352,7 @@ model CollectedLink {
 
   sources CollectedLinkSource[]
 
+  @@unique([ownerId, key])
   @@index([status, score])
   @@index([lastSeenAt])
 }
@@ -311,7 +377,10 @@ model CollectedLinkSource {
 
 /// Singleton-ish settings behind the "홍보 링크 수집 정책" dialog.
 model CollectionPolicy {
-  id String @id @default("default")
+  id String @id @default(cuid())
+
+  ownerId String @unique
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   enabled      Boolean @default(true)
   autoRegister Boolean @default(true)
@@ -338,15 +407,146 @@ model CollectionPolicy {
   excludedKeywords String @default("")
 
   /// Rolling counter for `dailyLimit`.
-  registeredToday Int      @default(0)
-  counterDate     String   @default("")
+  registeredToday Int    @default(0)
+  counterDate     String @default("")
 
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 /// Free-form key/value store for global settings (default pacing, etc.).
 model Setting {
   key       String   @id
   value     String
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Chat (web Telegram client)
+// ---------------------------------------------------------------------------
+
+/// A conversation in an account's chat list.
+///
+/// This is a cache of what Telegram already knows, kept so the dialog list
+/// renders instantly and unread counts can be summed across accounts without
+/// waking every session.
+model Dialog {
+  id String @id @default(cuid())
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  /// Telegram peer id as a string (bigint values do not fit an Int).
+  peerId   String
+  /// USER | GROUP | CHANNEL | BOT — see EntityType.
+  peerType String @default("UNKNOWN")
+
+  title    String?
+  username String?
+
+  unreadCount     Int       @default(0)
+  lastMessageId   Int?
+  lastMessageText String?
+  lastMessageAt   DateTime?
+  /// True when the newest message is one we sent.
+  lastMessageOut  Boolean   @default(false)
+
+  pinned   Boolean @default(false)
+  muted    Boolean @default(false)
+  archived Boolean @default(false)
+
+  syncedAt DateTime @default(now())
+
+  @@unique([accountId, peerId])
+  @@index([accountId, archived, lastMessageAt])
+}
+
+/// A cached message.
+///
+/// Only two kinds of message are stored: those in conversations the operator
+/// has actually opened, and those that matched a keyword rule. Persisting every
+/// message from several hundred promo rooms is neither useful nor affordable.
+model ChatMessage {
+  id String @id @default(cuid())
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  peerId    String
+  messageId Int
+
+  outgoing   Boolean @default(false)
+  senderId   String?
+  senderName String?
+
+  text String @default("")
+
+  /// PHOTO | DOCUMENT | VIDEO | VOICE | STICKER | OTHER — null for plain text.
+  mediaType String?
+  /// Set once the media has been downloaded into the local cache.
+  mediaPath String?
+  mediaName String?
+
+  /// True when the row was kept because a keyword rule matched.
+  keywordHit Boolean @default(false)
+
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([accountId, peerId, messageId])
+  @@index([accountId, peerId, messageId])
+  @@index([keywordHit, date])
+}
+
+/// "이 단어가 뜨면 알려줘" — evaluated against the live update stream.
+model KeywordRule {
+  id String @id @default(cuid())
+
+  ownerId String
+  name    String
+
+  /// Comma-separated terms; a message matching any of them is a hit.
+  terms String
+
+  /// Restrict to one account, or null for every account the operator owns.
+  accountId String?
+
+  enabled   Boolean   @default(true)
+  hitCount  Int       @default(0)
+  lastHitAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId, enabled])
+}
+
+// ---------------------------------------------------------------------------
+// Account health
+// ---------------------------------------------------------------------------
+
+/// Spam-block status and activity budget for one account.
+///
+/// Telegram does not expose "are you limited?" over the API, but @SpamBot
+/// answers the question in plain text, so the worker asks it periodically and
+/// parses the reply.
+model AccountHealth {
+  id String @id @default(cuid())
+
+  accountId String  @unique
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  /// OK | LIMITED | UNKNOWN — see SpamStatus.
+  spamStatus      String    @default("UNKNOWN")
+  /// Verbatim @SpamBot reply, so an unparsed answer is still readable.
+  spamMessage     String?
+  /// End of the restriction, when @SpamBot names a date.
+  restrictedUntil DateTime?
+  checkedAt       DateTime?
+
+  /// 0-100. Higher means closer to being limited — see src/lib/health.ts.
+  riskScore  Int    @default(0)
+  /// Why the score is what it is, in Korean.
+  riskReason String @default("")
+
+  updatedAt DateTime @default(now()) @updatedAt
 }

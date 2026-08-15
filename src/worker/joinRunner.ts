@@ -147,6 +147,7 @@ export async function runTask(taskId: string): Promise<boolean> {
 
     if (result.entity) {
       await upsertTarget({
+        ownerId: task.job.ownerId,
         key: task.target.key,
         title: result.entity.title,
         entityType: result.entity.entityType,
@@ -185,7 +186,7 @@ export async function runTask(taskId: string): Promise<boolean> {
 
     // 6. Promo-link harvesting for this room.
     if (options.autoCollect) {
-      await collectFromRoom(session, task.accountId, task.targetId, task.target.key, label);
+      await collectFromRoom(session, task.job.ownerId, task.targetId, task.target.key, label);
       await ensureRoomScan(task.accountId, task.targetId);
     }
 
@@ -256,7 +257,11 @@ async function discoverPrerequisites(
 
   const requiredIds: string[] = [];
   for (const link of detection.links) {
-    const required = await upsertTarget({ key: link.key, source: "AUTO_COLLECT" });
+    const required = await upsertTarget({
+      ownerId: task.job.ownerId,
+      key: link.key,
+      source: "AUTO_COLLECT",
+    });
     if (required.id === task.targetId) continue;
 
     // Remembered so later jobs skip straight to the prerequisite.
@@ -382,7 +387,7 @@ async function applyRoomSettings(
 /** Harvest t.me links advertised in a room we just entered. */
 export async function collectFromRoom(
   session: TelegramSession,
-  accountId: string,
+  ownerId: string,
   targetId: string,
   key: string,
   label: string,
@@ -395,7 +400,7 @@ export async function collectFromRoom(
     for (const link of extractLinks(message.text)) {
       if (link.key === key.toLowerCase() || seen.has(link.key)) continue;
       seen.add(link.key);
-      await recordCollectedLink({ link, sourceTargetId: targetId, sourceLabel: label });
+      await recordCollectedLink({ ownerId, link, sourceTargetId: targetId, sourceLabel: label });
     }
   }
   return seen.size;

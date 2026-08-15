@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { prisma } from "@/lib/db";
-import { handleError, ok } from "@/lib/apiResponse";
+import { fail, handleError, ok } from "@/lib/apiResponse";
+import { requireUser } from "@/lib/auth/session";
 import { encryptSession } from "@/lib/telegram/crypto";
 
 const createSchema = z.object({
@@ -19,10 +20,17 @@ const createSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const user = await requireUser();
     const body = createSchema.parse(await request.json());
+
+    const duplicate = await prisma.account.findUnique({
+      where: { ownerId_label: { ownerId: user.id, label: body.label } },
+    });
+    if (duplicate) return fail("같은 이름의 계정이 이미 있습니다.", 409);
 
     const account = await prisma.account.create({
       data: {
+        ownerId: user.id,
         label: body.label,
         phone: body.phone ?? null,
         sessionString: body.sessionString ? encryptSession(body.sessionString) : null,

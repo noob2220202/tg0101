@@ -1,4 +1,6 @@
 import { JoinResult, MessageLite, ResolvedEntity, TelegramError, TelegramSession } from "./types";
+import { ChatCapableSession } from "./chatTypes";
+import { MockChatSession } from "./mockChat";
 
 /**
  * An in-memory fake Telegram, enabled with MOCK_TELEGRAM=1.
@@ -43,9 +45,12 @@ const floodedOnce = new Set<string>();
 
 export class MockTelegramSession implements TelegramSession {
   readonly accountId: string;
+  /** Chat/profile behaviour lives in its own class, mirroring the real side. */
+  readonly chat: ChatCapableSession;
 
   constructor(accountId: string) {
     this.accountId = accountId;
+    this.chat = new MockChatSession(accountId);
     if (!joinedByAccount.has(accountId)) joinedByAccount.set(accountId, new Set());
   }
 

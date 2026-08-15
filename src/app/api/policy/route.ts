@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { prisma } from "@/lib/db";
-import { handleError, ok } from "@/lib/apiResponse";
+import { fail, handleError, ok } from "@/lib/apiResponse";
+import { requireUser } from "@/lib/auth/session";
 import { getPolicy } from "@/lib/services/policy";
 
 const bodySchema = z.object({
@@ -22,7 +23,8 @@ const bodySchema = z.object({
 
 export async function GET() {
   try {
-    return ok(await getPolicy());
+    const user = await requireUser();
+    return ok(await getPolicy(user.id));
   } catch (err) {
     return handleError(err);
   }
@@ -31,11 +33,21 @@ export async function GET() {
 /** Save the "홍보 링크 수집 정책" dialog. */
 export async function PUT(request: Request) {
   try {
+    const user = await requireUser();
     const body = bodySchema.parse(await request.json());
-    await getPolicy(); // ensure the row exists before updating
+    const policy = await getPolicy(user.id);
+
+    // A join account from another tenant would leak work across operators.
+    if (body.joinAccountId) {
+      const owned = await prisma.account.findFirst({
+        where: { id: body.joinAccountId, ownerId: user.id },
+        select: { id: true },
+      });
+      if (!owned) return fail("선택한 계정을 찾을 수 없습니다.", 404);
+    }
 
     const updated = await prisma.collectionPolicy.update({
-      where: { id: "default" },
+      where: { id: policy.id },
       data: {
         ...body,
         // An empty select means "register only, do not join".

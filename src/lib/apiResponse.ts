@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import { UnauthorizedError } from "./auth/session";
+
 /** Uniform JSON shape for every route handler. */
 
 export function ok<T>(data: T, init?: number) {
@@ -16,6 +18,9 @@ export function fail(message: string, status = 400) {
  * Validation errors are reported against the first offending field.
  */
 export function handleError(err: unknown) {
+  if (err instanceof UnauthorizedError) {
+    return fail(err.message, 401);
+  }
   if (err instanceof ZodError) {
     const first = err.issues[0];
     const path = first?.path.join(".") ?? "입력";

@@ -6,6 +6,7 @@ import { JobOptions, serializeJobOptions } from "../jobOptions";
  */
 
 export type CreateJobInput = {
+  ownerId: string;
   accountId: string;
   targetIds: string[];
   name?: string | null;
@@ -23,8 +24,16 @@ export async function createJoinJob(input: CreateJobInput): Promise<CreateJobRes
   const targetIds = [...new Set(input.targetIds)];
   if (targetIds.length === 0) throw new Error("입장할 방을 한 개 이상 선택하세요.");
 
-  const account = await prisma.account.findUnique({ where: { id: input.accountId } });
+  // Scoped by owner: an operator can only queue work on their own account.
+  const account = await prisma.account.findFirst({
+    where: { id: input.accountId, ownerId: input.ownerId },
+  });
   if (!account) throw new Error("계정을 찾을 수 없습니다.");
+
+  const ownedCount = await prisma.target.count({
+    where: { id: { in: targetIds }, ownerId: input.ownerId },
+  });
+  if (ownedCount !== targetIds.length) throw new Error("선택한 방 중 접근할 수 없는 항목이 있습니다.");
 
   let eligible = targetIds;
   let skipped = 0;
@@ -48,6 +57,7 @@ export async function createJoinJob(input: CreateJobInput): Promise<CreateJobRes
   const job = await prisma.joinJob.create({
     data: {
       name,
+      ownerId: input.ownerId,
       accountId: account.id,
       status: "RUNNING",
       options: serializeJobOptions(input.options),

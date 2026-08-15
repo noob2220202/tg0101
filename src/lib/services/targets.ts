@@ -3,13 +3,14 @@ import { TargetSource } from "../enums";
 import { parseLink } from "../links";
 
 /**
- * Targets are deduplicated by `key`, so importing the same link twice — by hand
- * and via the collector — converges on one row.
+ * Targets are deduplicated per operator by `key`, so importing the same link
+ * twice — by hand and via the collector — converges on one row, while two
+ * operators tracking the same room keep separate rows.
  */
 
 export type UpsertTargetInput = {
+  ownerId: string;
   key: string;
-  url?: string;
   title?: string | null;
   entityType?: string;
   memberCount?: number | null;
@@ -20,8 +21,9 @@ export type UpsertTargetInput = {
 export async function upsertTarget(input: UpsertTargetInput) {
   const kind = input.key.startsWith("+") ? "PRIVATE" : "PUBLIC";
   return prisma.target.upsert({
-    where: { key: input.key },
+    where: { ownerId_key: { ownerId: input.ownerId, key: input.key } },
     create: {
+      ownerId: input.ownerId,
       key: input.key,
       kind,
       title: input.title ?? null,
@@ -50,7 +52,11 @@ export type ImportResult = {
  * Bulk import from a textarea: one link per line, `@name`, bare usernames and
  * full URLs all accepted.
  */
-export async function importLinks(raw: string, source: TargetSource = "MANUAL"): Promise<ImportResult> {
+export async function importLinks(
+  ownerId: string,
+  raw: string,
+  source: TargetSource = "MANUAL",
+): Promise<ImportResult> {
   const lines = raw
     .split(/[\s,]+/)
     .map((s) => s.trim())
@@ -68,8 +74,11 @@ export async function importLinks(raw: string, source: TargetSource = "MANUAL"):
     if (seen.has(parsed.key)) continue;
     seen.add(parsed.key);
 
-    const before = await prisma.target.findUnique({ where: { key: parsed.key }, select: { id: true } });
-    const target = await upsertTarget({ key: parsed.key, source });
+    const before = await prisma.target.findUnique({
+      where: { ownerId_key: { ownerId, key: parsed.key } },
+      select: { id: true },
+    });
+    const target = await upsertTarget({ ownerId, key: parsed.key, source });
     result.targetIds.push(target.id);
     if (before) result.existing += 1;
     else result.created += 1;

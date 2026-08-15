@@ -2,16 +2,20 @@ import { prisma } from "../db";
 import { dayKey } from "../format";
 import { parseKeywords, ScorePolicy } from "../scoring";
 
-/** The collection policy is a single row; this creates it on first read. */
-export async function getPolicy() {
-  const existing = await prisma.collectionPolicy.findUnique({ where: { id: "default" } });
+/** Field defaults for a newly created operator's collection policy. */
+export function defaultPolicyData() {
+  return {
+    requiredKeywords: "자유홍보방, 광고, 구인구직, 총판, 토토, 본사",
+    minScore: 70,
+    dailyLimit: 100,
+  };
+}
+
+/** Each operator has exactly one policy; this creates it on first read. */
+export async function getPolicy(ownerId: string) {
+  const existing = await prisma.collectionPolicy.findUnique({ where: { ownerId } });
   if (existing) return existing;
-  return prisma.collectionPolicy.create({
-    data: {
-      id: "default",
-      requiredKeywords: "자유홍보방, 광고, 구인구직, 총판, 토토, 본사",
-    },
-  });
+  return prisma.collectionPolicy.create({ data: { ownerId, ...defaultPolicyData() } });
 }
 
 export type PolicyRow = Awaited<ReturnType<typeof getPolicy>>;
@@ -49,4 +53,9 @@ export async function consumeDailyBudget(policyId: string, amount = 1): Promise<
     where: { id: policyId },
     data: { registeredToday: { increment: amount }, counterDate: dayKey() },
   });
+}
+
+/** Every policy the worker should act on, one per operator. */
+export async function allPolicies() {
+  return prisma.collectionPolicy.findMany({ where: { enabled: true } });
 }
