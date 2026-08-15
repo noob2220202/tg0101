@@ -42,6 +42,8 @@ MOCK_TELEGRAM=1 npm run dev
 MOCK_TELEGRAM=1 npm run worker
 ```
 
+다른 포트로 띄우려면 `-- -p 4001` 을 붙입니다 (`npm run dev -- -p 4001`). 워커의 게이트웨이는 별도 포트(기본 4599)라 웹 포트와 겹치지 않습니다.
+
 브라우저에서 <http://localhost:3000> 을 열면 첫 실행 시 관리자 계정을 만드는 화면이 나옵니다. 시드를 돌렸다면 `admin@example.com` / `changeme123` 으로 로그인하세요.
 
 > **채팅은 워커가 떠 있어야 동작합니다.** 텔레그램 세션은 워커 프로세스만 들고 있고, 웹은 그 안의 게이트웨이를 통해서만 텔레그램에 접근합니다.
@@ -106,7 +108,7 @@ src/
     collector.ts      방 순회 수집, 링크 실체 확인, 자동 등록
     health.ts         @SpamBot 조회와 위험도 갱신
   app/                Next.js App Router (서버 컴포넌트 + 라우트 핸들러)
-  middleware.ts       쿠키 없는 요청을 /login 으로
+  proxy.ts            쿠키 없는 요청을 /login 으로 (Next 16의 middleware 후속)
 ```
 
 ### 세션은 한 프로세스만 소유합니다

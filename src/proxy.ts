@@ -7,10 +7,12 @@ import { SESSION_COOKIE } from "@/lib/auth/cookie";
  *
  * This runs on the edge and cannot reach the database, so it only checks that a
  * cookie exists. The real validation is `requireUser()` inside each page and
- * route handler — a forged or expired cookie gets past middleware and is
- * rejected there.
+ * route handler — a forged or expired cookie gets past it and is rejected
+ * there.
+ *
+ * (Next 16 renamed the `middleware` convention to `proxy`.)
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const hasCookie = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
   if (hasCookie) return NextResponse.next();
 
