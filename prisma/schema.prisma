@@ -1,0 +1,352 @@
+// Telegram auto-join SaaS — data model.
+//
+// SQLite has no native enum/array/json support, so status columns are plain
+// strings and the allowed values live in src/lib/enums.ts. Keyword lists are
+// stored comma-separated, option bags as JSON text.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+/// A Telegram user account that performs joins. `sessionString` is an encrypted
+/// MTProto StringSession.
+model Account {
+  id            String  @id @default(cuid())
+  label         String  @unique
+  phone         String?
+  sessionString String?
+
+  /// ACTIVE | COOLDOWN | NEEDS_CHECK | DISABLED — see AccountStatus.
+  status String @default("NEEDS_CHECK")
+
+  /// Telegram-imposed wait ("텔레그램이 51966초 대기를 요구했습니다").
+  cooldownUntil    DateTime?
+  cooldownSeconds  Int?
+  cooldownReason   String?
+
+  /// Pacing: minimum seconds between two joins on this account.
+  joinIntervalSec Int @default(20)
+  /// Safety valve: hard cap on joins per calendar day. 0 = unlimited.
+  dailyJoinLimit  Int @default(0)
+
+  /// Participate in the background promo-link collector.
+  collectEnabled Boolean @default(true)
+
+  lastJoinAt    DateTime?
+  lastCollectAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs        JoinJob[]
+  tasks       JoinTask[]
+  logs        JoinLog[]
+  memberships Membership[]
+  roomScans   RoomScan[]
+  policies    CollectionPolicy[]
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Targets (rooms we want to be in)
+// ---------------------------------------------------------------------------
+
+/// A group/channel we intend to join. Identified by `key`: either a public
+/// username (`somegroup`) or a private invite hash (`+AbCdEf...`).
+model Target {
+  id  String @id @default(cuid())
+  key String @unique
+
+  /// PUBLIC | PRIVATE — see TargetKind.
+  kind        String  @default("PUBLIC")
+  title       String?
+  /// GROUP | CHANNEL | BOT | USER | UNKNOWN — see EntityType.
+  entityType  String  @default("UNKNOWN")
+  memberCount Int?
+
+  /// MANUAL | AUTO_COLLECT — how the link entered the system.
+  source   String  @default("MANUAL")
+  note     String?
+  archived Boolean @default(false)
+
+  lastCheckedAt DateTime?
+  /// "말을 걸어 숨은 선행 채널 찾기" is attempted at most once per room.
+  probedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  prerequisites Prerequisite[] @relation("TargetPrerequisites")
+  requiredBy    Prerequisite[] @relation("PrerequisiteOf")
+  tasks         JoinTask[]
+  memberships   Membership[]
+  logs          JoinLog[]
+  roomScans     RoomScan[]
+  collectedFrom CollectedLinkSource[]
+  collectedLink CollectedLink?
+
+  @@index([archived])
+  @@index([source])
+}
+
+/// "선행 채널" — a room that must be joined before `target` will let us in.
+/// Learned once, reused on every later job.
+model Prerequisite {
+  id String @id @default(cuid())
+
+  targetId String
+  target   Target @relation("TargetPrerequisites", fields: [targetId], references: [id], onDelete: Cascade)
+
+  /// The room that has to be joined first.
+  requiredId String
+  required   Target @relation("PrerequisiteOf", fields: [requiredId], references: [id], onDelete: Cascade)
+
+  /// AUTO_NOTICE | PROBE | MANUAL — how we learned about it.
+  discoveredVia String   @default("AUTO_NOTICE")
+  discoveredAt  DateTime @default(now())
+
+  @@unique([targetId, requiredId])
+}
+
+/// Proof that an account is already inside a room (drives "이미 입장한 선행
+/// 채널은 건너뛰기").
+model Membership {
+  id String @id @default(cuid())
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  targetId String
+  target   Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  chatId   String?
+  joinedAt DateTime @default(now())
+  left     Boolean  @default(false)
+
+  @@unique([accountId, targetId])
+  @@index([accountId, left])
+}
+
+// ---------------------------------------------------------------------------
+// Jobs & queue
+// ---------------------------------------------------------------------------
+
+/// A batch of joins reserved from the UI ("72개 방 입장").
+model JoinJob {
+  id   String  @id @default(cuid())
+  name String?
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  /// RUNNING | PAUSED | DONE | CANCELLED — see JobStatus.
+  status String @default("RUNNING")
+
+  /// JSON blob of the reservation dialog's toggles — see JobOptions.
+  options String @default("{}")
+
+  totalCount   Int @default(0)
+  doneCount    Int @default(0)
+  failedCount  Int @default(0)
+  skippedCount Int @default(0)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  finishedAt DateTime?
+
+  tasks JoinTask[]
+
+  @@index([status])
+}
+
+/// One join attempt within a job.
+model JoinTask {
+  id String @id @default(cuid())
+
+  jobId String
+  job   JoinJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  targetId String
+  target   Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  /// PENDING | RUNNING | WAITING_APPROVAL | SUCCESS | FAILED | SKIPPED.
+  status String @default("PENDING")
+
+  /// Prerequisites are queued ahead of the task that discovered them.
+  priority     Int     @default(100)
+  isPrereq     Boolean @default(false)
+  parentTaskId String?
+
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3)
+  nextAttemptAt DateTime  @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+
+  lastError     String?
+  lastErrorCode String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([jobId, targetId])
+  @@index([status, nextAttemptAt])
+  @@index([accountId, status])
+}
+
+/// Append-only feed behind "최근 입장 기록".
+model JoinLog {
+  id String @id @default(cuid())
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  targetId String?
+  target   Target? @relation(fields: [targetId], references: [id], onDelete: SetNull)
+
+  /// INFO | WARN | ERROR — drives the dot colour in the feed.
+  level String @default("INFO")
+
+  /// Snapshot of the room title so the feed survives target deletion.
+  targetLabel String?
+  message     String
+  taskId      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([accountId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Promo-link collection
+// ---------------------------------------------------------------------------
+
+/// Bookkeeping for the collector: which rooms have been swept and when.
+model RoomScan {
+  id String @id @default(cuid())
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  targetId String
+  target   Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  lastScanAt      DateTime?
+  lastMessageId   Int?
+  scanCount       Int       @default(0)
+  nextScanAt      DateTime  @default(now())
+
+  @@unique([accountId, targetId])
+  @@index([nextScanAt])
+}
+
+/// A t.me link harvested from a room we are already in.
+model CollectedLink {
+  id  String @id @default(cuid())
+  key String @unique
+
+  url         String
+  title       String?
+  description String?
+
+  /// GROUP | CHANNEL | BOT | USER | UNKNOWN — resolved against Telegram.
+  entityType  String  @default("UNKNOWN")
+  memberCount Int?
+
+  /// 0-100 confidence that this is a joinable promo room.
+  score  Int    @default(0)
+  /// Human-readable "판정 사유".
+  reason String @default("")
+
+  /// PENDING | APPROVED | REGISTERED | EXCLUDED — see LinkStatus.
+  status String @default("PENDING")
+
+  /// How many distinct rooms mentioned it, and total mentions.
+  roomCount Int @default(0)
+  seenCount Int @default(0)
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  resolvedAt  DateTime?
+
+  registeredTargetId String? @unique
+  registeredTarget   Target? @relation(fields: [registeredTargetId], references: [id], onDelete: SetNull)
+
+  sources CollectedLinkSource[]
+
+  @@index([status, score])
+  @@index([lastSeenAt])
+}
+
+/// Which room a collected link was seen in, and how often.
+model CollectedLinkSource {
+  id String @id @default(cuid())
+
+  linkId String
+  link   CollectedLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  sourceTargetId String?
+  sourceTarget   Target? @relation(fields: [sourceTargetId], references: [id], onDelete: SetNull)
+
+  /// Snapshot of the source room title for display.
+  sourceLabel String?
+  count       Int      @default(1)
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([linkId, sourceTargetId])
+}
+
+/// Singleton-ish settings behind the "홍보 링크 수집 정책" dialog.
+model CollectionPolicy {
+  id String @id @default("default")
+
+  enabled      Boolean @default(true)
+  autoRegister Boolean @default(true)
+
+  minScore   Int @default(70)
+  dailyLimit Int @default(100)
+
+  /// Account used to auto-join freshly registered rooms. Null = register only.
+  joinAccountId String?
+  joinAccount   Account? @relation(fields: [joinAccountId], references: [id], onDelete: SetNull)
+
+  /// 연쇄 수집: keep collecting from rooms that were auto-joined.
+  chainCollect Boolean @default(true)
+
+  collectGroups   Boolean @default(true)
+  collectChannels Boolean @default(false)
+  collectBots     Boolean @default(false)
+  collectUsers    Boolean @default(false)
+
+  minMembers Int @default(0)
+
+  /// Comma-separated keyword lists.
+  requiredKeywords String @default("")
+  excludedKeywords String @default("")
+
+  /// Rolling counter for `dailyLimit`.
+  registeredToday Int      @default(0)
+  counterDate     String   @default("")
+
+  updatedAt DateTime @updatedAt @default(now())
+}
+
+/// Free-form key/value store for global settings (default pacing, etc.).
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @default(now())
+}
