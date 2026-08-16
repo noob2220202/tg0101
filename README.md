@@ -87,12 +87,32 @@ npm run worker:prod
 
 그다음 **계정** 화면 → *계정 연결* → 전화번호 → 문자로 온 코드 (2단계 인증이 있으면 비밀번호까지). 기존 StringSession 이 있다면 *세션 문자열 붙여넣기* 로 바로 등록할 수 있습니다.
 
+### pm2 로 상시 구동
+
+`ecosystem.config.cjs` 가 들어 있습니다. **빌드를 먼저** 해야 합니다.
+
+```bash
+npm run build
+pm2 start ecosystem.config.cjs
+
+pm2 list          # 상태
+pm2 logs          # 두 프로세스 로그 함께
+pm2 restart all
+pm2 save && pm2 startup   # 재부팅 후 자동 시작
+```
+
+웹 포트를 바꾸려면 `WEB_PORT=5000 pm2 start ecosystem.config.cjs` 처럼 넘기면 됩니다.
+
+두 프로세스 모두 `.env` 를 스스로 읽으므로 pm2 설정에 비밀값을 적을 필요가 없습니다 — Next 는 기본 동작이고, 워커는 `src/worker/loadEnv.ts` 가 가장 먼저 로드합니다.
+
+> **`tg-worker` 는 절대 인스턴스를 늘리지 마세요.** 텔레그램 세션을 독점 소유하는 프로세스라, 두 개가 뜨면 계정마다 업데이트 스트림이 갈라지고 읽음 처리가 깨집니다. 게이트웨이 포트도 겹칩니다. `tg-web` 도 SQLite 잠금 때문에 fork 1개로 두었습니다.
+
 ### 실전에서 꼭 지킬 것
 
 - **`SESSION_SECRET` 은 한 번 정하면 바꾸지 마세요.** 저장된 텔레그램 세션이 전부 복호화 불가가 되어 모든 계정을 다시 연결해야 합니다.
 - **`prisma/dev.db` 를 백업하세요.** 세션·입장 기록·수집 링크가 전부 이 파일 하나에 들어 있습니다.
 - **게이트웨이는 127.0.0.1 에만 바인딩됩니다.** 외부에 노출하지 마세요 — 소유권 검사는 웹 쪽에서 하므로, 게이트웨이가 열리면 그 검사를 건너뛸 수 있습니다.
-- **웹을 인터넷에 노출한다면 반드시 HTTPS 뒤에 두세요.** 세션 쿠키의 `secure` 플래그는 `NODE_ENV=production` 에서 켜집니다.
+- **HTTP 로 서비스하면 로그인이 조용히 실패합니다.** 운영 모드에서는 세션 쿠키에 `Secure` 가 붙는데, 브라우저는 평문 HTTP 에서 그런 쿠키를 그냥 버립니다 (`localhost` 는 예외라 로컬 테스트에서는 드러나지 않습니다). IP·도메인으로 접속하면서 TLS 가 아직 없다면 `.env` 에 `COOKIE_SECURE="0"` 을 넣으세요. 제대로 된 해법은 nginx·Caddy 로 HTTPS 를 씌우는 것입니다.
 - **계정은 한 번에 하나씩 늘리세요.** 새 계정은 위험도가 높게 잡히고(`신규 계정`), 며칠 지나야 안정됩니다.
 
 ---
@@ -227,3 +247,5 @@ npm run db:studio   # Prisma Studio 로 DB 열기
 | `GATEWAY_URL` | `http://127.0.0.1:4599` | 웹이 게이트웨이를 찾는 주소 |
 | `GATEWAY_TOKEN` | `local-dev-token` | 웹↔게이트웨이 공유 비밀 |
 | `MEDIA_DIR` | `.media` | 내려받은 사진·파일 캐시 위치 |
+| `COOKIE_SECURE` | 운영 모드에서 켜짐 | `0` 이면 평문 HTTP 에서도 로그인 가능 |
+| `WEB_PORT` | `4001` | pm2 로 띄울 때의 웹 포트 |

@@ -15,6 +15,22 @@ import { SESSION_COOKIE } from "./cookie";
 export { SESSION_COOKIE };
 const SESSION_DAYS = 14;
 
+/**
+ * Whether to mark the cookie `Secure`.
+ *
+ * Defaults to on in production, which is right behind TLS — but a browser
+ * silently discards a `Secure` cookie over plain HTTP, and the symptom is a
+ * login that "does nothing". Browsers exempt `localhost`, so this only bites
+ * when reaching the app by IP or hostname without TLS; `COOKIE_SECURE=0` is
+ * the escape hatch for that case.
+ */
+function cookieSecure(): boolean {
+  const override = process.env.COOKIE_SECURE;
+  if (override === "0" || override === "false") return false;
+  if (override === "1" || override === "true") return true;
+  return process.env.NODE_ENV === "production";
+}
+
 export async function createSession(userId: string, userAgent?: string | null): Promise<string> {
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 3600_000);
@@ -27,7 +43,7 @@ export async function createSession(userId: string, userAgent?: string | null): 
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     path: "/",
     expires: expiresAt,
   });

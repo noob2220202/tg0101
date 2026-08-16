@@ -1,3 +1,6 @@
+// Must come first: everything below reads process.env at module scope.
+import "./loadEnv";
+
 import { prisma } from "../lib/db";
 import { dropAllSessions, isMockMode } from "../lib/telegram";
 import { trimLogs } from "../lib/services/logs";
