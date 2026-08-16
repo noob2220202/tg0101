@@ -124,6 +124,8 @@ pm2 logs          # 두 프로세스 로그 함께
 pm2 save && pm2 startup   # 재부팅 후 자동 시작
 ```
 
+라우트를 추가·삭제한 뒤에는 `.next/dev` 에 남은 낡은 타입 파일이 빌드를 깨뜨릴 수 있는데, `prebuild` 가 매 빌드마다 정리하므로 신경 쓰지 않아도 됩니다.
+
 **빌드를 빼먹으면** `tg-web` 이 "Could not find a production build" 로 죽습니다. 설정 파일이 시작 전에 경고를 찍고, 다섯 번 시도한 뒤 `errored` 로 멈춥니다 (로그를 무한히 채우지 않습니다). `tg-worker` 는 영향 없이 계속 돕니다.
 
 포트·바인딩을 바꾸려면 `WEB_PORT=5000 WEB_HOST=0.0.0.0 pm2 start ecosystem.config.cjs` 처럼 넘깁니다. pm2 는 이 설정 파일을 프로세스보다 먼저 읽으므로 이 둘만은 `.env` 가 아니라 셸에서 줘야 합니다.

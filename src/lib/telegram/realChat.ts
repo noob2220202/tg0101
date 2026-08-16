@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { Api, TelegramClient, utils } from "teleproto";
-import { CustomFile } from "teleproto/client/uploads";
-import { NewMessage, NewMessageEvent } from "teleproto/events";
+// Everything comes from the package root: subpath imports like
+// "teleproto/events" are listed in serverExternalPackages but Node cannot
+// resolve them the way the bundler does, which Next warns about at build time.
+import { Api, client as tgClient, events, TelegramClient, utils } from "teleproto";
 
 import { entityTypeOf } from "../links";
 import { toTelegramError } from "./errors";
@@ -177,7 +178,10 @@ export async function downloadMedia(
     const [message] = await client.getMessages(entity, { ids: [messageId] });
     if (!message?.media) return null;
 
-    const dir = path.join(mediaRoot(), accountId, peerId.replace("-", "n"));
+    // turbopackIgnore: the media root is configurable at runtime, so this
+    // cannot be traced statically — without the hint Turbopack pulls the whole
+    // project into the server bundle.
+    const dir = path.join(/* turbopackIgnore: true */ mediaRoot(), accountId, peerId.replace("-", "n"));
     await fs.mkdir(dir, { recursive: true });
 
     const name = mediaNameOf(message.media) ?? `${messageId}`;
@@ -275,7 +279,7 @@ export async function setProfilePhoto(
 ): Promise<void> {
   try {
     const file = await client.uploadFile({
-      file: new CustomFile(fileName, buffer.length, "", buffer),
+      file: new tgClient.uploads.CustomFile(fileName, buffer.length, "", buffer),
       workers: 1,
     });
     await client.invoke(new Api.photos.UploadProfilePhoto({ file }));
@@ -318,7 +322,7 @@ export async function downloadOwnPhoto(
     const me = await client.getMe();
     if (!(me as unknown as { photo?: unknown }).photo) return null;
 
-    const dir = path.join(mediaRoot(), accountId);
+    const dir = path.join(/* turbopackIgnore: true */ mediaRoot(), accountId);
     await fs.mkdir(dir, { recursive: true });
     const target = path.join(dir, "avatar.jpg");
 
@@ -416,7 +420,7 @@ export function onNewMessage(
   client: TelegramClient,
   handler: (message: ChatMessageDto) => void,
 ): () => void {
-  const callback = async (event: NewMessageEvent) => {
+  const callback = async (event: events.NewMessageEvent) => {
     try {
       const message = event.message;
       const peerId = peerIdOf(message.peerId);
@@ -426,8 +430,8 @@ export function onNewMessage(
     }
   };
 
-  client.addEventHandler(callback, new NewMessage({}));
-  return () => client.removeEventHandler(callback, new NewMessage({}));
+  client.addEventHandler(callback, new events.NewMessage({}));
+  return () => client.removeEventHandler(callback, new events.NewMessage({}));
 }
 
 // ---------------------------------------------------------------------------
