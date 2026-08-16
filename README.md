@@ -50,13 +50,50 @@ MOCK_TELEGRAM=1 npm run worker
 
 `MOCK_TELEGRAM=1` 은 실제 텔레그램에 접속하지 않는 테스트 모드입니다. 가짜 방·가짜 선행 채널·가짜 대기시간이 결정론적으로 생성되므로, 계정 없이도 큐·페이싱·수집이 도는 것을 그대로 볼 수 있습니다.
 
-### 실제 계정 연결
+---
 
-1. <https://my.telegram.org> → *API development tools* 에서 `api_id` / `api_hash` 를 발급받아 `.env` 에 채웁니다.
-2. `MOCK_TELEGRAM=0` 으로 앱과 워커를 다시 띄웁니다.
-3. **계정** 화면 → *계정 연결* → 전화번호 입력 → 문자로 온 코드 입력 (2단계 인증이 걸려 있으면 비밀번호까지).
+## 실전으로 띄우기 (시드 데이터 없이)
 
-기존에 발급받은 StringSession 이 있다면 *세션 문자열 붙여넣기* 로 바로 등록할 수도 있습니다.
+`npm run setup` 은 예시 계정·방을 만듭니다. 실제로 운영할 때는 **`setup:prod`** 를 쓰세요 — 스키마만 만들고 데이터는 넣지 않습니다.
+
+```bash
+git clone https://github.com/noob2220202/tg0101.git
+cd tg0101
+git checkout claude/telegram-auto-join-saas-e6nq8j
+npm ci
+
+cp .env.example .env
+#   아래 4개는 반드시 채우거나 바꿔야 합니다.
+#   TELEGRAM_API_ID / TELEGRAM_API_HASH  — my.telegram.org 발급값
+#   SESSION_SECRET                        — openssl rand -base64 32
+#   GATEWAY_TOKEN                         — openssl rand -base64 24
+#   MOCK_TELEGRAM="0"
+
+npm run setup:prod    # 스키마만 (시드 없음)
+npm run build
+```
+
+터미널 두 개로 띄웁니다.
+
+```bash
+# 웹
+npm start -- -p 4001
+
+# 워커 + 게이트웨이 (watch 모드가 아닌 prod 스크립트)
+npm run worker:prod
+```
+
+<http://localhost:4001> 접속 → **첫 화면에서 관리자 계정을 직접 만듭니다.** 관리자가 하나라도 생기면 이 생성 화면은 막히므로, 배포 직후 바로 만들어 두세요.
+
+그다음 **계정** 화면 → *계정 연결* → 전화번호 → 문자로 온 코드 (2단계 인증이 있으면 비밀번호까지). 기존 StringSession 이 있다면 *세션 문자열 붙여넣기* 로 바로 등록할 수 있습니다.
+
+### 실전에서 꼭 지킬 것
+
+- **`SESSION_SECRET` 은 한 번 정하면 바꾸지 마세요.** 저장된 텔레그램 세션이 전부 복호화 불가가 되어 모든 계정을 다시 연결해야 합니다.
+- **`prisma/dev.db` 를 백업하세요.** 세션·입장 기록·수집 링크가 전부 이 파일 하나에 들어 있습니다.
+- **게이트웨이는 127.0.0.1 에만 바인딩됩니다.** 외부에 노출하지 마세요 — 소유권 검사는 웹 쪽에서 하므로, 게이트웨이가 열리면 그 검사를 건너뛸 수 있습니다.
+- **웹을 인터넷에 노출한다면 반드시 HTTPS 뒤에 두세요.** 세션 쿠키의 `secure` 플래그는 `NODE_ENV=production` 에서 켜집니다.
+- **계정은 한 번에 하나씩 늘리세요.** 새 계정은 위험도가 높게 잡히고(`신규 계정`), 며칠 지나야 안정됩니다.
 
 ---
 
