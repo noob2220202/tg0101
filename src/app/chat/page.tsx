@@ -3,17 +3,17 @@ import Link from "next/link";
 import { ChatClient } from "@/components/chat/ChatClient";
 import { ChatAccount } from "@/components/chat/types";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { gatewayHealthy } from "@/lib/gateway/client";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChatPage() {
-  const user = await requireUser();
+  const owner = await getOwner();
 
   const [accounts, gatewayUp] = await Promise.all([
     prisma.account.findMany({
-      where: { ownerId: user.id, status: { not: "DISABLED" } },
+      where: { ownerId: owner.id, status: { not: "DISABLED" } },
       orderBy: { createdAt: "asc" },
       select: { id: true, label: true, status: true, firstName: true, lastName: true, username: true },
     }),

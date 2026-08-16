@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { fail } from "@/lib/apiResponse";
 import { assertAccountOwner } from "@/lib/gateway/client";
 import { GATEWAY_HEADER, gatewayToken, gatewayUrl } from "@/gateway/protocol";
@@ -22,8 +22,8 @@ export async function GET(request: Request) {
   // Authentication and ownership are checked before anything is fetched, and
   // are reported distinctly from a genuine download failure.
   try {
-    const user = await requireUser();
-    await assertAccountOwner(user.id, accountId);
+    const owner = await getOwner();
+    await assertAccountOwner(owner.id, accountId);
   } catch {
     return fail("미디어를 찾을 수 없습니다.", 404);
   }

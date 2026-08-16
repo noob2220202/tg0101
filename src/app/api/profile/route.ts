@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { handleError, ok } from "@/lib/apiResponse";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { callGateway } from "@/lib/gateway/client";
 
 export const runtime = "nodejs";
@@ -39,41 +39,41 @@ const bodySchema = z.discriminatedUnion("action", [
 /** Profile editing and session management for one Telegram account. */
 export async function POST(request: Request) {
   try {
-    const user = await requireUser();
+    const owner = await getOwner();
     const body = bodySchema.parse(await request.json());
     const { accountId } = body;
 
     switch (body.action) {
       case "get":
-        return ok(await callGateway(user.id, accountId, "getProfile"));
+        return ok(await callGateway(owner.id, accountId, "getProfile"));
       case "update":
         return ok(
-          await callGateway(user.id, accountId, "updateProfile", {
+          await callGateway(owner.id, accountId, "updateProfile", {
             firstName: body.firstName,
             lastName: body.lastName,
             about: body.about,
           }),
         );
       case "username":
-        return ok(await callGateway(user.id, accountId, "updateUsername", { username: body.username }));
+        return ok(await callGateway(owner.id, accountId, "updateUsername", { username: body.username }));
       case "photo": {
         // ~4/3 expansion from base64, so this caps the original around 4 MB.
         if (body.dataBase64.length > 6_000_000) throw new Error("이미지가 너무 큽니다. 4MB 이하로 올려주세요.");
         return ok(
-          await callGateway(user.id, accountId, "setProfilePhoto", {
+          await callGateway(owner.id, accountId, "setProfilePhoto", {
             dataBase64: body.dataBase64,
             fileName: body.fileName,
           }),
         );
       }
       case "deletePhoto":
-        return ok(await callGateway(user.id, accountId, "deleteProfilePhoto"));
+        return ok(await callGateway(owner.id, accountId, "deleteProfilePhoto"));
       case "sessions":
-        return ok(await callGateway(user.id, accountId, "listAuthorizations"));
+        return ok(await callGateway(owner.id, accountId, "listAuthorizations"));
       case "resetSession":
-        return ok(await callGateway(user.id, accountId, "resetAuthorization", { hash: body.hash }));
+        return ok(await callGateway(owner.id, accountId, "resetAuthorization", { hash: body.hash }));
       case "checkSpam":
-        return ok(await callGateway(user.id, accountId, "checkSpam"));
+        return ok(await callGateway(owner.id, accountId, "checkSpam"));
     }
   } catch (err) {
     return handleError(err);

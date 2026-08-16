@@ -1,15 +1,15 @@
 import { AccountList, AccountRow } from "@/components/AccountList";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { isMockMode } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountsPage() {
-  const user = await requireUser();
+  const owner = await getOwner();
 
   const accounts = await prisma.account.findMany({
-    where: { ownerId: user.id },
+    where: { ownerId: owner.id },
     orderBy: { createdAt: "asc" },
     include: {
       _count: { select: { memberships: true } },
@@ -19,7 +19,7 @@ export default async function AccountsPage() {
 
   const pendingCounts = await prisma.joinTask.groupBy({
     by: ["accountId"],
-    where: { status: "PENDING", account: { ownerId: user.id } },
+    where: { status: "PENDING", account: { ownerId: owner.id } },
     _count: { _all: true },
   });
   const pendingMap = new Map(pendingCounts.map((row) => [row.accountId, row._count._all]));

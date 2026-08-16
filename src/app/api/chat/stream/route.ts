@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { fail } from "@/lib/apiResponse";
 import { GATEWAY_HEADER, gatewayToken, gatewayUrl } from "@/gateway/protocol";
 
@@ -8,21 +8,15 @@ export const dynamic = "force-dynamic";
 /**
  * Server-sent events, proxied from the gateway.
  *
- * The browser never talks to the gateway directly: this route authenticates the
- * operator first and then asks the gateway for that operator's stream only, so
- * one tenant's messages cannot reach another's browser.
+ * The browser never talks to the gateway directly — the gateway is loopback
+ * only, and this route is what bridges it to the page.
  */
 export async function GET(request: Request) {
-  let user;
-  try {
-    user = await requireUser();
-  } catch {
-    return fail("로그인이 필요합니다.", 401);
-  }
+  const owner = await getOwner();
 
   let upstream: Response;
   try {
-    upstream = await fetch(`${gatewayUrl()}/events?ownerId=${encodeURIComponent(user.id)}`, {
+    upstream = await fetch(`${gatewayUrl()}/events?ownerId=${encodeURIComponent(owner.id)}`, {
       headers: { [GATEWAY_HEADER]: gatewayToken() },
       signal: request.signal,
     });

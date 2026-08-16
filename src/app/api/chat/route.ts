@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { handleError, ok } from "@/lib/apiResponse";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { callGateway } from "@/lib/gateway/client";
 
 export const runtime = "nodejs";
@@ -42,20 +42,20 @@ const bodySchema = z.discriminatedUnion("action", [
 
 export async function POST(request: Request) {
   try {
-    const user = await requireUser();
+    const owner = await getOwner();
     const body = bodySchema.parse(await request.json());
 
     switch (body.action) {
       case "dialogs":
         return ok(
-          await callGateway(user.id, body.accountId, "listDialogs", {
+          await callGateway(owner.id, body.accountId, "listDialogs", {
             limit: body.limit,
             archived: body.archived,
           }),
         );
       case "history":
         return ok(
-          await callGateway(user.id, body.accountId, "getHistory", {
+          await callGateway(owner.id, body.accountId, "getHistory", {
             peerId: body.peerId,
             limit: body.limit,
             offsetId: body.offsetId,
@@ -63,14 +63,14 @@ export async function POST(request: Request) {
         );
       case "send":
         return ok(
-          await callGateway(user.id, body.accountId, "sendMessage", {
+          await callGateway(owner.id, body.accountId, "sendMessage", {
             peerId: body.peerId,
             text: body.text,
           }),
         );
       case "read":
         return ok(
-          await callGateway(user.id, body.accountId, "markRead", {
+          await callGateway(owner.id, body.accountId, "markRead", {
             peerId: body.peerId,
             maxId: body.maxId,
           }),

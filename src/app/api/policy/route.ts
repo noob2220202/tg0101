@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok } from "@/lib/apiResponse";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { getPolicy } from "@/lib/services/policy";
 
 const bodySchema = z.object({
@@ -23,8 +23,8 @@ const bodySchema = z.object({
 
 export async function GET() {
   try {
-    const user = await requireUser();
-    return ok(await getPolicy(user.id));
+    const owner = await getOwner();
+    return ok(await getPolicy(owner.id));
   } catch (err) {
     return handleError(err);
   }
@@ -33,14 +33,14 @@ export async function GET() {
 /** Save the "홍보 링크 수집 정책" dialog. */
 export async function PUT(request: Request) {
   try {
-    const user = await requireUser();
+    const owner = await getOwner();
     const body = bodySchema.parse(await request.json());
-    const policy = await getPolicy(user.id);
+    const policy = await getPolicy(owner.id);
 
     // A join account from another tenant would leak work across operators.
     if (body.joinAccountId) {
       const owned = await prisma.account.findFirst({
-        where: { id: body.joinAccountId, ownerId: user.id },
+        where: { id: body.joinAccountId, ownerId: owner.id },
         select: { id: true },
       });
       if (!owned) return fail("선택한 계정을 찾을 수 없습니다.", 404);

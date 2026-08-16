@@ -9,9 +9,15 @@
  * Both processes read `.env` themselves (Next natively, the worker via
  * src/worker/loadEnv.ts), so pm2 does not need to inject anything — keeping
  * secrets out of this file, which is committed.
+ *
+ * WEB_HOST / WEB_PORT are read from the shell here, not from .env, because pm2
+ * evaluates this file before either process starts.
  */
 
 const WEB_PORT = process.env.WEB_PORT || 4001;
+// There is no sign-in, so the default binding is loopback only. Override with
+// WEB_HOST=0.0.0.0 once the port is firewalled.
+const WEB_HOST = process.env.WEB_HOST || "127.0.0.1";
 
 module.exports = {
   apps: [
@@ -20,7 +26,7 @@ module.exports = {
       // Invoking Next's binary directly rather than through npm keeps pm2's
       // signals going to the actual server instead of an npm wrapper.
       script: "node_modules/next/dist/bin/next",
-      args: `start -p ${WEB_PORT}`,
+      args: `start -H ${WEB_HOST} -p ${WEB_PORT}`,
       cwd: __dirname,
 
       // Fork, not cluster: several Next instances would each write to the same

@@ -2,17 +2,17 @@ import { Prisma } from "@prisma/client";
 
 import { QueueList, QueueRow } from "@/components/QueueList";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 200;
 
 export default async function QueuePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
-  const user = await requireUser();
+  const owner = await getOwner();
   const { status = "PENDING" } = await searchParams;
 
-  const scope: Prisma.JoinTaskWhereInput = { job: { ownerId: user.id } };
+  const scope: Prisma.JoinTaskWhereInput = { job: { ownerId: owner.id } };
   const where: Prisma.JoinTaskWhereInput = status === "ALL" ? scope : { ...scope, status };
 
   const [tasks, grouped] = await Promise.all([

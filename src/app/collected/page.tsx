@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { CollectedList, CollectedRow } from "@/components/CollectedList";
 import { Card } from "@/components/ui";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { formatNumber, relativeTime } from "@/lib/format";
 import { getCollectionSummary } from "@/lib/services/stats";
 import { getPolicy } from "@/lib/services/policy";
@@ -17,11 +17,11 @@ export default async function CollectedPage({
 }: {
   searchParams: Promise<{ status?: string; q?: string; score?: string; type?: string }>;
 }) {
-  const user = await requireUser();
+  const owner = await getOwner();
   const { status = "PENDING", q = "", score = "", type = "" } = await searchParams;
 
   const where: Prisma.CollectedLinkWhereInput = {
-    ownerId: user.id,
+    ownerId: owner.id,
     ...(status === "ALL" ? {} : { status }),
     ...(q ? { OR: [{ key: { contains: q } }, { title: { contains: q } }, { reason: { contains: q } }] } : {}),
     ...(score ? { score: { gte: Number(score) } } : {}),
@@ -38,10 +38,10 @@ export default async function CollectedPage({
         sources: { orderBy: { count: "desc" }, take: 1 },
       },
     }),
-    getCollectionSummary(user.id),
-    getPolicy(user.id),
+    getCollectionSummary(owner.id),
+    getPolicy(owner.id),
     prisma.account.findMany({
-      where: { ownerId: user.id, status: { not: "DISABLED" } },
+      where: { ownerId: owner.id, status: { not: "DISABLED" } },
       orderBy: { label: "asc" },
       select: { id: true, label: true },
     }),

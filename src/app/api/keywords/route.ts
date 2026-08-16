@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok } from "@/lib/apiResponse";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
@@ -29,20 +29,20 @@ const bodySchema = z.discriminatedUnion("action", [createSchema, updateSchema, d
 /** Keyword rules for the live message stream. */
 export async function POST(request: Request) {
   try {
-    const user = await requireUser();
+    const owner = await getOwner();
     const body = bodySchema.parse(await request.json());
 
     if (body.action === "create") {
       if (body.accountId) {
         const owned = await prisma.account.findFirst({
-          where: { id: body.accountId, ownerId: user.id },
+          where: { id: body.accountId, ownerId: owner.id },
           select: { id: true },
         });
         if (!owned) return fail("계정을 찾을 수 없습니다.", 404);
       }
       const rule = await prisma.keywordRule.create({
         data: {
-          ownerId: user.id,
+          ownerId: owner.id,
           name: body.name,
           terms: body.terms,
           accountId: body.accountId || null,
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     }
 
     const existing = await prisma.keywordRule.findFirst({
-      where: { id: body.id, ownerId: user.id },
+      where: { id: body.id, ownerId: owner.id },
       select: { id: true },
     });
     if (!existing) return fail("규칙을 찾을 수 없습니다.", 404);

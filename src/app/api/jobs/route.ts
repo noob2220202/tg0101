@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { handleError, ok } from "@/lib/apiResponse";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { jobOptionsSchema } from "@/lib/jobOptions";
 import { createJoinJob } from "@/lib/services/jobs";
 
@@ -15,9 +15,9 @@ const bodySchema = z.object({
 /** Queue a batch of joins — the "입장 예약" dialog's submit. */
 export async function POST(request: Request) {
   try {
-    const user = await requireUser();
+    const owner = await getOwner();
     const body = bodySchema.parse(await request.json());
-    const result = await createJoinJob({ ...body, ownerId: user.id });
+    const result = await createJoinJob({ ...body, ownerId: owner.id });
     return ok(result, 201);
   } catch (err) {
     return handleError(err);

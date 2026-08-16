@@ -1,21 +1,17 @@
 import { PrismaClient } from "@prisma/client";
 
 import { DEFAULT_JOB_OPTIONS, serializeJobOptions } from "../src/lib/jobOptions";
-import { hashPassword } from "../src/lib/auth/password";
 import { defaultPolicyData } from "../src/lib/services/policy";
 
 /**
  * Development seed.
  *
- * Creates one operator, two Telegram accounts, a batch of targets and a queued
- * job so the worker has something to chew on. Intended to be run with
- * MOCK_TELEGRAM=1 — the accounts have no real session.
+ * Creates two Telegram accounts, a batch of targets and a queued job so the
+ * worker has something to chew on. Intended to be run with MOCK_TELEGRAM=1 —
+ * the accounts have no real session.
  */
 
 const prisma = new PrismaClient();
-
-const SEED_EMAIL = process.env.SEED_EMAIL ?? "admin@example.com";
-const SEED_PASSWORD = process.env.SEED_PASSWORD ?? "changeme123";
 
 const SAMPLE_KEYS = [
   "freepromo_kr",
@@ -43,15 +39,9 @@ const SAMPLE_KEYS = [
 async function main() {
   console.log("seeding…");
 
-  const owner = await prisma.user.upsert({
-    where: { email: SEED_EMAIL },
-    create: {
-      email: SEED_EMAIL,
-      name: "관리자",
-      role: "ADMIN",
-      passwordHash: await hashPassword(SEED_PASSWORD),
-      policy: { create: defaultPolicyData() },
-    },
+  const owner = await prisma.owner.upsert({
+    where: { id: "solo" },
+    create: { id: "solo", policy: { create: defaultPolicyData() } },
     update: {},
   });
 
@@ -107,8 +97,7 @@ async function main() {
     });
   }
 
-  console.log(`done — 로그인: ${SEED_EMAIL} / ${SEED_PASSWORD}`);
-  console.log(`accounts: ${main.label}, ${secondary.label} · targets: ${targets.length}`);
+  console.log(`done — accounts: ${main.label}, ${secondary.label} · targets: ${targets.length}`);
 }
 
 main()

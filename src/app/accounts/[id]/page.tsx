@@ -3,17 +3,17 @@ import { notFound } from "next/navigation";
 
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { gatewayHealthy } from "@/lib/gateway/client";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireUser();
+  const owner = await getOwner();
   const { id } = await params;
 
   const account = await prisma.account.findFirst({
-    where: { id, ownerId: user.id },
+    where: { id, ownerId: owner.id },
     include: { health: true },
   });
   if (!account) notFound();

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok } from "@/lib/apiResponse";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { refreshJobProgress } from "@/lib/services/jobs";
 
 const bodySchema = z.object({
@@ -13,11 +13,11 @@ const bodySchema = z.object({
 /** Retry failed joins, or drop queued ones. */
 export async function POST(request: Request) {
   try {
-    const user = await requireUser();
+    const owner = await getOwner();
     const { taskIds, action } = bodySchema.parse(await request.json());
 
     const tasks = await prisma.joinTask.findMany({
-      where: { id: { in: taskIds }, job: { ownerId: user.id } },
+      where: { id: { in: taskIds }, job: { ownerId: owner.id } },
       select: { id: true, jobId: true, status: true },
     });
     if (tasks.length === 0) return fail("선택한 작업을 찾을 수 없습니다.", 404);

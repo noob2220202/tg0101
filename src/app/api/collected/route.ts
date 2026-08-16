@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok } from "@/lib/apiResponse";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { registerCollectedLink, rescore } from "@/lib/services/collect";
 import { getPolicy } from "@/lib/services/policy";
 
@@ -21,25 +21,25 @@ const bodySchema = z.object({
  */
 export async function POST(request: Request) {
   try {
-    const user = await requireUser();
+    const owner = await getOwner();
     const { linkIds, action, joinAccountId } = bodySchema.parse(await request.json());
 
     // Narrow the ids to rows this operator owns; anything else silently drops
     // out rather than being acted on.
     const owned = await prisma.collectedLink.findMany({
-      where: { id: { in: linkIds }, ownerId: user.id },
+      where: { id: { in: linkIds }, ownerId: owner.id },
       select: { id: true },
     });
     const ownedIds = owned.map((row) => row.id);
     if (ownedIds.length === 0) return fail("선택한 링크를 찾을 수 없습니다.", 404);
 
     if (action === "register") {
-      const policy = await getPolicy(user.id);
+      const policy = await getPolicy(owner.id);
       let account = joinAccountId !== undefined ? joinAccountId : policy.joinAccountId;
 
       if (account) {
         const owned = await prisma.account.findFirst({
-          where: { id: account, ownerId: user.id },
+          where: { id: account, ownerId: owner.id },
           select: { id: true },
         });
         // Registering is still worth doing even if the join account is bogus.

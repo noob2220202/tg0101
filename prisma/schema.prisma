@@ -14,44 +14,27 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// Operators (tenants)
+// Owner
 // ---------------------------------------------------------------------------
 
-/// A person who signs in to the console. Every Telegram account, target and
-/// collected link belongs to exactly one of these.
-model User {
-  id           String @id @default(cuid())
-  email        String @unique
-  passwordHash String
-  name         String
-
-  /// ADMIN | MEMBER — see UserRole. Admins may manage other operators.
-  role String @default("MEMBER")
+/// The single operator this installation belongs to.
+///
+/// There is no sign-in: the app is meant to sit behind a firewall or an SSH
+/// tunnel and serve one person. The row exists purely so every account, target
+/// and collected link has an owner to hang off, which keeps the door open to
+/// re-introducing real accounts later without reshaping the schema.
+model Owner {
+  id    String @id
+  label String @default("운영자")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sessions       UserSession[]
   accounts       Account[]
   targets        Target[]
   jobs           JoinJob[]
   collectedLinks CollectedLink[]
   policy         CollectionPolicy?
-}
-
-/// A signed-in browser session. The cookie holds `token`; nothing else.
-model UserSession {
-  id    String @id @default(cuid())
-  token String @unique
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  userAgent String?
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@index([expiresAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +50,7 @@ model Account {
   sessionString String?
 
   ownerId String
-  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner   Owner  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   /// Cached Telegram profile, refreshed whenever the gateway connects.
   firstName      String?
@@ -123,7 +106,7 @@ model Target {
   key String
 
   ownerId String
-  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner   Owner  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   /// PUBLIC | PRIVATE — see TargetKind.
   kind        String  @default("PUBLIC")
@@ -205,7 +188,7 @@ model JoinJob {
   name String?
 
   ownerId String
-  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner   Owner  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   accountId String
   account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -321,7 +304,7 @@ model CollectedLink {
   key String
 
   ownerId String
-  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner   Owner  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   url         String
   title       String?
@@ -380,7 +363,7 @@ model CollectionPolicy {
   id String @id @default(cuid())
 
   ownerId String @unique
-  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner   Owner  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   enabled      Boolean @default(true)
   autoRegister Boolean @default(true)

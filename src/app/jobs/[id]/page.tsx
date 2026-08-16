@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Badge, Card, CardHeader, Progress } from "@/components/ui";
 import { JobControls } from "@/components/JobControls";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { absoluteTime, relativeTime } from "@/lib/format";
 import { parseJobOptions } from "@/lib/jobOptions";
 import { JOB_STATUS_LABEL, JobStatus, TASK_STATUS_LABEL, TaskStatus } from "@/lib/enums";
@@ -30,11 +30,11 @@ const OPTION_LABELS: Array<[keyof ReturnType<typeof parseJobOptions>, string]> =
 ];
 
 export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireUser();
+  const owner = await getOwner();
   const { id } = await params;
 
   const job = await prisma.joinJob.findFirst({
-    where: { id, ownerId: user.id },
+    where: { id, ownerId: owner.id },
     include: {
       account: { select: { label: true, joinIntervalSec: true } },
       tasks: {

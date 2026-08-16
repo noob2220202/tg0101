@@ -3,23 +3,23 @@ import Link from "next/link";
 import { KeywordRules, RuleRow } from "@/components/KeywordRules";
 import { Badge } from "@/components/ui";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth/session";
+import { getOwner } from "@/lib/owner";
 import { relativeTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function KeywordsPage() {
-  const user = await requireUser();
+  const owner = await getOwner();
 
   const [rules, accounts, recentHits] = await Promise.all([
-    prisma.keywordRule.findMany({ where: { ownerId: user.id }, orderBy: { createdAt: "desc" } }),
+    prisma.keywordRule.findMany({ where: { ownerId: owner.id }, orderBy: { createdAt: "desc" } }),
     prisma.account.findMany({
-      where: { ownerId: user.id, status: { not: "DISABLED" } },
+      where: { ownerId: owner.id, status: { not: "DISABLED" } },
       orderBy: { label: "asc" },
       select: { id: true, label: true },
     }),
     prisma.chatMessage.findMany({
-      where: { keywordHit: true, account: { ownerId: user.id } },
+      where: { keywordHit: true, account: { ownerId: owner.id } },
       orderBy: { date: "desc" },
       take: 30,
       include: { account: { select: { label: true } } },
