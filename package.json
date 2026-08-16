@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "setup": "prisma generate && prisma db push && tsx prisma/seed.ts",
-    "setup:prod": "prisma generate && prisma db push"
+    "setup:prod": "prisma generate && prisma db push",
+    "deploy": "npm run build && pm2 startOrReload ecosystem.config.cjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

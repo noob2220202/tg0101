@@ -1,6 +1,9 @@
 /**
  * pm2 process definitions.
  *
+ *   npm run deploy           # build + (re)start both processes — use this
+ *
+ * or by hand:
  *   npm run build            # required — the web app runs the built output
  *   pm2 start ecosystem.config.cjs
  *   pm2 logs                 # both processes
@@ -13,6 +16,19 @@
  * WEB_HOST / WEB_PORT are read from the shell here, not from .env, because pm2
  * evaluates this file before either process starts.
  */
+
+const fs = require("node:fs");
+const path = require("node:path");
+
+// `next start` runs the built output, so a missing build makes tg-web exit
+// immediately — and with plain autorestart that becomes an infinite loop that
+// only fills the log. Say so once, here, where it is readable.
+if (!fs.existsSync(path.join(__dirname, ".next", "BUILD_ID"))) {
+  console.warn(
+    "\n[tg] .next 빌드가 없습니다. `npm run build` 를 먼저 실행하세요.\n" +
+      "    빌드 없이 시작하면 tg-web 은 몇 번 재시도한 뒤 errored 로 멈춥니다.\n",
+  );
+}
 
 const WEB_PORT = process.env.WEB_PORT || 4001;
 // There is no sign-in, so the default binding is loopback only. Override with
@@ -36,6 +52,12 @@ module.exports = {
 
       autorestart: true,
       max_memory_restart: "600M",
+      // Give up instead of looping forever: anything that dies within 20s of
+      // starting is broken, not unlucky. pm2 parks it as `errored` after this
+      // many tries so the failure is visible in `pm2 list`.
+      min_uptime: "20s",
+      max_restarts: 5,
+      restart_delay: 4000,
       env: { NODE_ENV: "production" },
 
       out_file: "logs/web.out.log",
@@ -59,6 +81,9 @@ module.exports = {
       max_memory_restart: "800M",
       // Telegram sessions take a moment to close cleanly on SIGTERM.
       kill_timeout: 10000,
+      min_uptime: "20s",
+      max_restarts: 5,
+      restart_delay: 4000,
       env: { NODE_ENV: "production" },
 
       out_file: "logs/worker.out.log",

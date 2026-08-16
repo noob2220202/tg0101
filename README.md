@@ -110,14 +110,21 @@ WEB_HOST=0.0.0.0 pm2 start ecosystem.config.cjs
 `ecosystem.config.cjs` 가 들어 있습니다. **빌드를 먼저** 해야 합니다.
 
 ```bash
-npm run build
+npm run deploy    # 빌드 + pm2 startOrReload — 코드를 받을 때마다 이것만
+```
+
+손으로 하시려면:
+
+```bash
+npm run build     # 필수. next start 는 빌드 결과물을 실행합니다
 pm2 start ecosystem.config.cjs
 
 pm2 list          # 상태
 pm2 logs          # 두 프로세스 로그 함께
-pm2 restart all
 pm2 save && pm2 startup   # 재부팅 후 자동 시작
 ```
+
+**빌드를 빼먹으면** `tg-web` 이 "Could not find a production build" 로 죽습니다. 설정 파일이 시작 전에 경고를 찍고, 다섯 번 시도한 뒤 `errored` 로 멈춥니다 (로그를 무한히 채우지 않습니다). `tg-worker` 는 영향 없이 계속 돕니다.
 
 포트·바인딩을 바꾸려면 `WEB_PORT=5000 WEB_HOST=0.0.0.0 pm2 start ecosystem.config.cjs` 처럼 넘깁니다. pm2 는 이 설정 파일을 프로세스보다 먼저 읽으므로 이 둘만은 `.env` 가 아니라 셸에서 줘야 합니다.
 
