@@ -2,14 +2,15 @@ import { prisma } from "../lib/db";
 import { getChatSession } from "../lib/telegram";
 import type { ChatMessageDto } from "../lib/telegram/chatTypes";
 import { compileRule, matchRules } from "../lib/keywords";
+import { collectFromLiveMessage } from "../lib/services/liveCollect";
 
 /**
  * Live update fan-out.
  *
  * One subscription per connected account. Messages are pushed to any listening
- * browser and evaluated against the operator's keyword rules; only rules that
- * match cause a database write, which is what keeps hundreds of promo rooms
- * from filling the disk.
+ * browser, harvested for promo links, and evaluated against the operator's
+ * keyword rules; only rules that match cause a database write, which is what
+ * keeps hundreds of promo rooms from filling the disk.
  */
 
 type Broadcast = (ownerId: string, payload: unknown) => void;
@@ -91,6 +92,12 @@ async function handleMessage(
   } catch {
     // Persistence failures must not stop the browser from seeing the message.
   }
+
+  // Promo links are filed as they are posted. The worker's sweep still runs,
+  // but only to cover the rooms and the stretches this stream missed.
+  await collectFromLiveMessage(accountId, ownerId, message).catch((err) => {
+    console.log(`[gateway] collect failed: ${(err as Error).message}`);
+  });
 
   const hits = await evaluateRules(accountId, ownerId, message);
   broadcast(ownerId, { type: "message", accountId, message, keywordHits: hits });

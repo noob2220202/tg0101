@@ -186,8 +186,14 @@ export async function runTask(taskId: string): Promise<boolean> {
 
     // 6. Promo-link harvesting for this room.
     if (options.autoCollect) {
-      await collectFromRoom(session, task.job.ownerId, task.targetId, task.target.key, label);
-      await ensureRoomScan(task.accountId, task.targetId);
+      const harvest = await collectFromRoom(
+        session,
+        task.job.ownerId,
+        task.targetId,
+        task.target.key,
+        label,
+      );
+      await ensureRoomScan(task.accountId, task.targetId, harvest.lastMessageId);
     }
 
     await finishTask(
@@ -384,7 +390,13 @@ async function applyRoomSettings(
   }
 }
 
-/** Harvest t.me links advertised in a room we just entered. */
+/**
+ * Harvest t.me links from a room's recent history.
+ *
+ * Used when a room is first entered and by the gap-filling sweep. Passing
+ * `sinceMessageId` skips the stretch a previous read already covered; the
+ * returned high-water mark is what the caller stores for next time.
+ */
 export async function collectFromRoom(
   session: TelegramSession,
   ownerId: string,
@@ -392,29 +404,47 @@ export async function collectFromRoom(
   key: string,
   label: string,
   limit = 40,
-): Promise<number> {
+  sinceMessageId: number | null = null,
+): Promise<{ found: number; lastMessageId: number | null }> {
   const messages = await session.readMessages(key, limit).catch(() => []);
   const seen = new Set<string>();
+  let highest = sinceMessageId;
 
   for (const message of messages) {
+    if (highest === null || message.id > highest) highest = message.id;
+    if (sinceMessageId !== null && message.id <= sinceMessageId) continue;
+
     for (const link of extractLinks(message.text)) {
       if (link.key === key.toLowerCase() || seen.has(link.key)) continue;
       seen.add(link.key);
-      await recordCollectedLink({ ownerId, link, sourceTargetId: targetId, sourceLabel: label });
+      await recordCollectedLink({
+        ownerId,
+        link,
+        sourceTargetId: targetId,
+        sourceLabel: label,
+        sourceMessageId: message.id,
+      });
     }
   }
-  return seen.size;
+  return { found: seen.size, lastMessageId: highest };
 }
 
-async function ensureRoomScan(accountId: string, targetId: string): Promise<void> {
+async function ensureRoomScan(
+  accountId: string,
+  targetId: string,
+  lastMessageId: number | null = null,
+): Promise<void> {
   await prisma.roomScan.upsert({
     where: { accountId_targetId: { accountId, targetId } },
-    create: { accountId, targetId, nextScanAt: nextScanTime() },
+    create: { accountId, targetId, lastMessageId, nextScanAt: nextScanTime() },
     update: {},
   });
 }
 
-/** Rooms are re-read every few hours, spread out so scans do not bunch up. */
+/**
+ * When the gap-filling sweep re-reads a room, spread out so scans do not bunch
+ * up. Live collection carries the room between sweeps.
+ */
 export function nextScanTime(base = Date.now()): Date {
   const hours = 3 + Math.random() * 3;
   return new Date(base + hours * 3600_000);

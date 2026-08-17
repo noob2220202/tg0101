@@ -17,6 +17,12 @@ export type RecordLinkInput = {
   /** The room the link was advertised in. */
   sourceTargetId: string | null;
   sourceLabel: string | null;
+  /**
+   * Message the link was found in. The live stream, the gap-filling sweep and a
+   * second account sitting in the same room all see the same posting, so every
+   * message is counted once per room and replays are ignored.
+   */
+  sourceMessageId?: number | null;
 };
 
 /**
@@ -26,7 +32,7 @@ export type RecordLinkInput = {
  * link is advertised, which only grows over time.
  */
 export async function recordCollectedLink(input: RecordLinkInput, policy?: PolicyRow) {
-  const { ownerId, link, sourceTargetId, sourceLabel } = input;
+  const { ownerId, link, sourceTargetId, sourceLabel, sourceMessageId = null } = input;
   const activePolicy = policy ?? (await getPolicy(ownerId));
 
   // Links we already track as targets are not news.
@@ -55,7 +61,7 @@ export async function recordCollectedLink(input: RecordLinkInput, policy?: Polic
         firstSeenAt: now,
         lastSeenAt: now,
         sources: sourceTargetId
-          ? { create: [{ sourceTargetId, sourceLabel, count: 1, lastSeenAt: now }] }
+          ? { create: [{ sourceTargetId, sourceLabel, count: 1, lastMessageId: sourceMessageId, lastSeenAt: now }] }
           : undefined,
       },
     });
@@ -66,13 +72,30 @@ export async function recordCollectedLink(input: RecordLinkInput, policy?: Polic
   if (sourceTargetId) {
     const source = existing.sources.find((s) => s.sourceTargetId === sourceTargetId);
     if (source) {
+      // Already counted this posting — a re-read, not a new sighting.
+      if (isCounted(sourceMessageId, source.lastMessageId)) {
+        const { sources: _sources, ...row } = existing;
+        return row;
+      }
       await prisma.collectedLinkSource.update({
         where: { id: source.id },
-        data: { count: { increment: 1 }, lastSeenAt: now, sourceLabel: sourceLabel ?? source.sourceLabel },
+        data: {
+          count: { increment: 1 },
+          lastSeenAt: now,
+          lastMessageId: sourceMessageId ?? source.lastMessageId,
+          sourceLabel: sourceLabel ?? source.sourceLabel,
+        },
       });
     } else {
       await prisma.collectedLinkSource.create({
-        data: { linkId: existing.id, sourceTargetId, sourceLabel, count: 1, lastSeenAt: now },
+        data: {
+          linkId: existing.id,
+          sourceTargetId,
+          sourceLabel,
+          count: 1,
+          lastMessageId: sourceMessageId,
+          lastSeenAt: now,
+        },
       });
     }
   }
@@ -87,6 +110,17 @@ export async function recordCollectedLink(input: RecordLinkInput, policy?: Polic
   });
 
   return rescore(existing.id, activePolicy);
+}
+
+/**
+ * True when this room has already counted the message.
+ *
+ * Sightings without a message id (a manual import, say) are always counted:
+ * there is nothing to compare them against.
+ */
+function isCounted(messageId: number | null, countedThrough: number | null): boolean {
+  if (messageId === null || countedThrough === null) return false;
+  return messageId <= countedThrough;
 }
 
 async function countDistinctRooms(linkId: string, incomingSourceId: string | null): Promise<number> {

@@ -353,7 +353,10 @@ model CollectedLinkSource {
   /// Snapshot of the source room title for display.
   sourceLabel String?
   count       Int      @default(1)
-  lastSeenAt  DateTime @default(now())
+  /// Highest message id already counted from this room. The live stream and the
+  /// periodic sweep see the same messages; this is what stops double counting.
+  lastMessageId Int?
+  lastSeenAt    DateTime @default(now())
 
   @@unique([linkId, sourceTargetId])
 }

@@ -9,9 +9,14 @@ import { collectFromRoom, nextScanTime } from "./joinRunner";
 /**
  * The background promo-link collector.
  *
- * It sweeps rooms the accounts are already in, on a slow rotation, and files
- * every t.me link it finds. This runs independently of the join queue —
- * "입장 큐와 무관하게 상시로 모이며".
+ * Links are collected in real time by the gateway (see
+ * `lib/services/liveCollect.ts`): every message arriving on an account's live
+ * subscription is harvested as it is posted. What is left here is the safety
+ * net — a slow rotation that re-reads each room's recent history to recover
+ * whatever the live stream missed while a session was down, plus the two jobs
+ * that turn harvested links into targets: resolving them against Telegram and
+ * auto-registering the ones that clear the threshold. All of it runs
+ * independently of the join queue — "입장 큐와 무관하게 상시로 모이며".
  */
 
 /** Rooms swept per tick. Kept low so the collector never crowds out joins. */
@@ -91,19 +96,25 @@ async function collectForPolicy(policy: PolicyRow, now: Date): Promise<number> {
     try {
       const session = await getSession(scan.accountId);
       const label = scan.target.title ?? scan.target.key;
-      const found = await collectFromRoom(
+      const harvest = await collectFromRoom(
         session,
         policy.ownerId,
         scan.targetId,
         scan.target.key,
         label,
         MESSAGES_PER_SCAN,
+        scan.lastMessageId,
       );
-      collected += found;
+      collected += harvest.found;
 
       await prisma.roomScan.update({
         where: { id: scan.id },
-        data: { lastScanAt: now, scanCount: { increment: 1 }, nextScanAt: nextScanTime(now.getTime()) },
+        data: {
+          lastScanAt: now,
+          lastMessageId: harvest.lastMessageId ?? scan.lastMessageId,
+          scanCount: { increment: 1 },
+          nextScanAt: nextScanTime(now.getTime()),
+        },
       });
       await prisma.account.update({ where: { id: scan.accountId }, data: { lastCollectAt: now } });
     } catch (err) {
