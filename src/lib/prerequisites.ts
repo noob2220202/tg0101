@@ -47,7 +47,11 @@ export function detectPrerequisites(messages: MessageLite[], selfKey: string): P
     if (!message.text) continue;
     if (!NOTICE_PATTERNS.some((re) => re.test(message.text))) continue;
 
-    const links = extractLinks(message.text).filter((link) => link.key !== selfKey.toLowerCase());
+    // Notices often put the channel behind anchor text or a button, so the
+    // message's hidden addresses count as much as its body.
+    const links = extractLinks(message.text, message.links).filter(
+      (link) => link.key !== selfKey.toLowerCase(),
+    );
     if (links.length === 0) continue;
 
     return {

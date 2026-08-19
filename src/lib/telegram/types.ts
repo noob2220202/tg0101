@@ -18,6 +18,18 @@ export type MessageLite = {
   /** Pinned messages usually carry the rules, including prerequisites. */
   pinned?: boolean;
   fromBot?: boolean;
+  /**
+   * Addresses the message carries outside its text: hidden hyperlinks, inline
+   * button targets and the link preview. Promo rooms hide most of their links
+   * this way.
+   */
+  links?: string[];
+};
+
+/** Narrowing options for a history read. */
+export type ReadOptions = {
+  /** Only messages newer than this id — how an incremental sweep stays cheap. */
+  minId?: number | null;
 };
 
 export type JoinStatus =
@@ -48,7 +60,7 @@ export interface TelegramSession {
   join(key: string): Promise<JoinResult>;
 
   /** Newest-first slice of a room's history. */
-  readMessages(key: string, limit: number): Promise<MessageLite[]>;
+  readMessages(key: string, limit: number, opts?: ReadOptions): Promise<MessageLite[]>;
 
   /** Send a short message, wait briefly for a reply, then delete what we sent. */
   probe(key: string, text: string): Promise<MessageLite[]>;

@@ -62,6 +62,43 @@ function mediaNameOf(media: unknown): string | null {
   return attributes.find((a) => a.className === "DocumentAttributeFilename")?.fileName ?? null;
 }
 
+/**
+ * Addresses a message carries outside its own text.
+ *
+ * Three places hold them, and promo rooms use all three to keep the body
+ * looking clean: `MessageEntityTextUrl` behind a piece of anchor text, inline
+ * keyboard buttons, and the link preview attached to the message. Scanning only
+ * `message.message` misses every one of them.
+ */
+export function hiddenUrlsOf(message: unknown): string[] {
+  const source = message as {
+    entities?: Array<{ url?: string }>;
+    replyMarkup?: { rows?: Array<{ buttons?: Array<{ url?: string }> }> };
+    media?: { webpage?: { url?: string; displayUrl?: string } };
+  };
+
+  const urls: string[] = [];
+
+  // Hidden hyperlinks. Other entity classes carry no url field.
+  for (const entity of source.entities ?? []) {
+    if (entity.url) urls.push(entity.url);
+  }
+
+  // Inline keyboard buttons ("👉 입장하기").
+  for (const row of source.replyMarkup?.rows ?? []) {
+    for (const button of row.buttons ?? []) {
+      if (button.url) urls.push(button.url);
+    }
+  }
+
+  // The link preview, which survives even when the text was edited away.
+  const webpage = source.media?.webpage;
+  if (webpage?.url) urls.push(webpage.url);
+  if (webpage?.displayUrl) urls.push(webpage.displayUrl);
+
+  return [...new Set(urls)];
+}
+
 function senderNameOf(sender: unknown): string | null {
   const s = sender as { title?: string; firstName?: string; lastName?: string; username?: string } | null;
   if (!s) return null;
@@ -82,6 +119,7 @@ export function toMessageDto(message: Api.Message, peerId: string): ChatMessageD
     senderName: senderNameOf(sender),
     mediaType: mediaTypeOf(message.media),
     mediaName: mediaNameOf(message.media),
+    links: hiddenUrlsOf(message),
   };
 }
 

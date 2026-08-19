@@ -5,12 +5,18 @@ import { rescore, runAutoRegistration } from "../lib/services/collect";
 import { allPolicies, PolicyRow } from "../lib/services/policy";
 import { writeLog } from "../lib/services/logs";
 import { collectFromRoom, nextScanTime } from "./joinRunner";
+import { invalidateRoomIndex } from "./liveCollector";
+import type { TelegramSession } from "../lib/telegram/types";
 
 /**
  * The background promo-link collector.
  *
- * It sweeps rooms the accounts are already in, on a slow rotation, and files
- * every t.me link it finds. This runs independently of the join queue —
+ * Links arrive in real time: the gateway's update stream files them the moment
+ * they are posted (see `liveCollector`). What is left here is the backfill —
+ * a slow rotation over every room, picking up whatever was posted while the
+ * account was offline or its session was down, plus the two steps that need a
+ * managed rate: asking Telegram what each harvested link is, and promoting the
+ * good ones. All of it runs independently of the join queue —
  * "입장 큐와 무관하게 상시로 모이며".
  */
 
@@ -91,21 +97,31 @@ async function collectForPolicy(policy: PolicyRow, now: Date): Promise<number> {
     try {
       const session = await getSession(scan.accountId);
       const label = scan.target.title ?? scan.target.key;
-      const found = await collectFromRoom(
+      const sweep = await collectFromRoom(
         session,
         policy.ownerId,
         scan.targetId,
         scan.target.key,
         label,
         MESSAGES_PER_SCAN,
+        scan.lastMessageId,
       );
-      collected += found;
+      collected += sweep.collected;
 
       await prisma.roomScan.update({
         where: { id: scan.id },
-        data: { lastScanAt: now, scanCount: { increment: 1 }, nextScanAt: nextScanTime(now.getTime()) },
+        data: {
+          lastScanAt: now,
+          scanCount: { increment: 1 },
+          nextScanAt: nextScanTime(now.getTime()),
+          lastMessageId: sweep.lastMessageId ?? scan.lastMessageId,
+        },
       });
       await prisma.account.update({ where: { id: scan.accountId }, data: { lastCollectAt: now } });
+
+      // The live collector matches updates to rooms by chat id, so a membership
+      // that never recorded one is invisible to it until this fills it in.
+      await backfillChatId(session, scan.accountId, scan.targetId, scan.target.key);
     } catch (err) {
       const error = toTelegramError(err);
 
@@ -143,6 +159,31 @@ async function collectForPolicy(policy: PolicyRow, now: Date): Promise<number> {
   await resolvePendingLinks(policy);
   await runAutoRegistration(policy);
   return collected;
+}
+
+/**
+ * Record the room's chat id on the membership if the join never captured one.
+ *
+ * Best effort: a failure here only means live updates for this room keep being
+ * skipped until the next sweep tries again.
+ */
+async function backfillChatId(
+  session: TelegramSession,
+  accountId: string,
+  targetId: string,
+  key: string,
+): Promise<void> {
+  const membership = await prisma.membership.findUnique({
+    where: { accountId_targetId: { accountId, targetId } },
+    select: { id: true, chatId: true },
+  });
+  if (!membership || membership.chatId) return;
+
+  const entity = await session.resolve(key).catch(() => null);
+  if (!entity?.chatId) return;
+
+  await prisma.membership.update({ where: { id: membership.id }, data: { chatId: entity.chatId } });
+  invalidateRoomIndex(accountId);
 }
 
 /**

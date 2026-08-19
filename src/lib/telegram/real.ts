@@ -2,7 +2,7 @@ import { Api, Logger, sessions, TelegramClient } from "teleproto";
 
 import { entityTypeOf, kindOfKey } from "../links";
 import { toTelegramError } from "./errors";
-import { JoinResult, MessageLite, ResolvedEntity, TelegramError, TelegramSession } from "./types";
+import { JoinResult, MessageLite, ReadOptions, ResolvedEntity, TelegramError, TelegramSession } from "./types";
 import type {
   AuthorizationInfo,
   ChatCapableSession,
@@ -201,20 +201,27 @@ export class RealTelegramSession implements TelegramSession, ChatCapableSession 
   // Reading & probing
   // -------------------------------------------------------------------------
 
-  async readMessages(key: string, limit: number): Promise<MessageLite[]> {
+  async readMessages(key: string, limit: number, opts: ReadOptions = {}): Promise<MessageLite[]> {
     await this.connect();
     try {
       const entity = await this.client.getEntity(key);
-      const messages = await this.client.getMessages(entity, { limit });
+      // `minId` lets a sweep pick up where the last one stopped instead of
+      // re-reading — and re-counting — the same history every few hours.
+      const messages = await this.client.getMessages(entity, {
+        limit,
+        ...(opts.minId ? { minId: opts.minId } : {}),
+      });
       return messages
-        .filter((m) => typeof m.message === "string" && m.message.length > 0)
         .map((m) => ({
           id: m.id,
-          text: m.message as string,
+          text: typeof m.message === "string" ? m.message : "",
           date: new Date(m.date * 1000),
           pinned: Boolean((m as unknown as { pinned?: boolean }).pinned),
           fromBot: Boolean((m as unknown as { viaBotId?: unknown }).viaBotId),
-        }));
+          links: chat.hiddenUrlsOf(m),
+        }))
+        // A message with no body can still carry a button or a link preview.
+        .filter((m) => m.text.length > 0 || m.links.length > 0);
     } catch (err) {
       throw toTelegramError(err);
     }
@@ -252,13 +259,15 @@ export class RealTelegramSession implements TelegramSession, ChatCapableSession 
     try {
       const after = await this.client.getMessages(entity, { limit: 10 });
       replies = after
-        .filter((m) => m.id > sinceId && m.id !== sentId && typeof m.message === "string" && m.message)
+        .filter((m) => m.id > sinceId && m.id !== sentId)
         .map((m) => ({
           id: m.id,
-          text: m.message as string,
+          text: typeof m.message === "string" ? m.message : "",
           date: new Date(m.date * 1000),
           fromBot: true,
-        }));
+          links: chat.hiddenUrlsOf(m),
+        }))
+        .filter((m) => m.text.length > 0 || m.links.length > 0);
     } catch {
       // Reading back is best effort.
     }

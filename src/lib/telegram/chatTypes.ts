@@ -35,6 +35,12 @@ export type ChatMessageDto = {
   /** PHOTO | DOCUMENT | VIDEO | VOICE | STICKER | OTHER */
   mediaType: string | null;
   mediaName: string | null;
+  /**
+   * Addresses that are in the message but not in its text: hidden hyperlinks,
+   * inline button targets and the link preview. The live collector reads these
+   * alongside the body.
+   */
+  links?: string[];
 };
 
 /** The signed-in account's own profile. */

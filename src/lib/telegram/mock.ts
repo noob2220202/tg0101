@@ -1,6 +1,7 @@
-import { JoinResult, MessageLite, ResolvedEntity, TelegramError, TelegramSession } from "./types";
+import { JoinResult, MessageLite, ReadOptions, ResolvedEntity, TelegramError, TelegramSession } from "./types";
 import { ChatCapableSession } from "./chatTypes";
 import { MockChatSession } from "./mockChat";
+import { hash, isJoined, joinedKeys, markJoined, mockChatId, mockRoomTitle, pick, ROOM_TITLES } from "./mockRooms";
 
 /**
  * An in-memory fake Telegram, enabled with MOCK_TELEGRAM=1.
@@ -11,35 +12,6 @@ import { MockChatSession } from "./mockChat";
  * same key always behaves the same way across restarts.
  */
 
-const ROOM_TITLES = [
-  "자유홍보방",
-  "구인구직 소통방",
-  "총판 광고방",
-  "먹튀검증 공유",
-  "코인 정보방",
-  "부업 정보공유",
-  "이벤트 알림방",
-  "본사 공지채널",
-  "맛집 추천방",
-  "중고거래 소통방",
-];
-
-/** Deterministic hash so a given key always produces the same room. */
-function hash(key: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < key.length; i++) {
-    h ^= key.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
-
-function pick<T>(arr: T[], seed: number): T {
-  return arr[seed % arr.length];
-}
-
-/** Rooms the mock account has joined, keyed by account id. */
-const joinedByAccount = new Map<string, Set<string>>();
 /** Rooms we have already flood-waited on, so a retry can succeed. */
 const floodedOnce = new Set<string>();
 
@@ -51,11 +23,6 @@ export class MockTelegramSession implements TelegramSession {
   constructor(accountId: string) {
     this.accountId = accountId;
     this.chat = new MockChatSession(accountId);
-    if (!joinedByAccount.has(accountId)) joinedByAccount.set(accountId, new Set());
-  }
-
-  private get joined(): Set<string> {
-    return joinedByAccount.get(this.accountId)!;
   }
 
   async connect(): Promise<void> {}
@@ -68,8 +35,8 @@ export class MockTelegramSession implements TelegramSession {
 
     return {
       key,
-      chatId: String(1000000 + (seed % 900000)),
-      title: `${pick(ROOM_TITLES, seed)} ${(seed % 90) + 10}`,
+      chatId: mockChatId(key),
+      title: mockRoomTitle(key),
       entityType: seed % 7 === 0 ? "CHANNEL" : seed % 23 === 0 ? "BOT" : "GROUP",
       memberCount: 50 + (seed % 9000),
       requiresApproval: seed % 17 === 0,
@@ -81,7 +48,7 @@ export class MockTelegramSession implements TelegramSession {
     const entity = await this.resolve(key);
 
     if (!entity) throw new TelegramError("NOT_FOUND", "존재하지 않는 방입니다.", { permanent: true });
-    if (this.joined.has(key)) return { status: "ALREADY_MEMBER", chatId: entity.chatId, entity };
+    if (isJoined(this.accountId, key)) return { status: "ALREADY_MEMBER", chatId: entity.chatId, entity };
 
     // Telegram asks for a wait on roughly 1 in 9 first attempts.
     if (seed % 9 === 0 && !floodedOnce.has(key + this.accountId)) {
@@ -93,11 +60,11 @@ export class MockTelegramSession implements TelegramSession {
     if (entity.requiresApproval) return { status: "REQUESTED", chatId: null, entity };
     if (seed % 31 === 0) throw new TelegramError("PRIVATE", "비공개 방입니다.", { permanent: true });
 
-    this.joined.add(key);
+    markJoined(this.accountId, key);
     return { status: "JOINED", chatId: entity.chatId, entity };
   }
 
-  async readMessages(key: string, limit: number): Promise<MessageLite[]> {
+  async readMessages(key: string, limit: number, opts: ReadOptions = {}): Promise<MessageLite[]> {
     const seed = hash(key);
     const messages: MessageLite[] = [];
     const now = Date.now();
@@ -120,9 +87,14 @@ export class MockTelegramSession implements TelegramSession {
         id: 100 + i,
         date: new Date(now - i * 600_000),
         text: `${pick(ROOM_TITLES, other)} 홍보합니다\nhttps://t.me/promo${other % 900}`,
+        // Every other room hides its second link behind anchor text, the way
+        // real promo posts do.
+        links: i % 2 === 0 ? [`https://t.me/+Hidden${other % 900}Invite`] : undefined,
       });
     }
-    return messages.slice(0, limit);
+
+    const fresh = opts.minId ? messages.filter((m) => m.id > opts.minId!) : messages;
+    return fresh.slice(0, limit);
   }
 
   async probe(key: string): Promise<MessageLite[]> {
@@ -144,7 +116,7 @@ export class MockTelegramSession implements TelegramSession {
 
   async listJoined(): Promise<ResolvedEntity[]> {
     const out: ResolvedEntity[] = [];
-    for (const key of this.joined) {
+    for (const key of joinedKeys(this.accountId)) {
       const entity = await this.resolve(key);
       if (entity) out.push(entity);
     }

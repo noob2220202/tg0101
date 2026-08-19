@@ -7,6 +7,7 @@ import {
   ProfileUpdate,
   SpamCheckResult,
 } from "./chatTypes";
+import { joinedKeys, mockPeerId, mockRoomTitle } from "./mockRooms";
 
 /**
  * Chat/profile behaviour for MOCK_TELEGRAM=1.
@@ -34,6 +35,34 @@ function hash(value: string): number {
     h = Math.imul(h, 16777619);
   }
   return Math.abs(h);
+}
+
+/**
+ * A promo post in a room the account actually joined.
+ *
+ * The peer id matches what the join fake reported, so the live collector can
+ * map it back to a target and file the links — mock mode exercises the whole
+ * real-time path, not just the chat UI.
+ */
+function promoPost(accountId: string, id: number): ChatMessageDto | null {
+  const keys = joinedKeys(accountId);
+  if (keys.length === 0) return null;
+
+  const key = keys[Math.floor(Math.random() * keys.length)];
+  const seed = hash(`${key}:${id}`);
+  return {
+    id,
+    peerId: mockPeerId(key),
+    text: `${mockRoomTitle(String(seed))} 새로 열었습니다\nhttps://t.me/live${seed % 900} 놀러오세요`,
+    date: new Date(),
+    outgoing: false,
+    senderId: String(seed % 100000),
+    senderName: PEOPLE[seed % PEOPLE.length],
+    mediaType: null,
+    mediaName: null,
+    // Half of them hide the second room behind anchor text.
+    links: seed % 2 === 0 ? [`https://t.me/+LiveHidden${seed % 700}`] : undefined,
+  };
 }
 
 /** Per-account mutable state, so sent messages persist within a run. */
@@ -110,6 +139,23 @@ function dialogsFor(accountId: string): DialogSummary[] {
     });
   }
   return out.sort((a, b) => (b.lastMessageAt?.getTime() ?? 0) - (a.lastMessageAt?.getTime() ?? 0));
+}
+
+/** Ordinary traffic in one of the account's conversations. */
+function chatterPost(accountId: string, id: number): ChatMessageDto {
+  const dialogs = dialogsFor(accountId);
+  const dialog = dialogs[Math.floor(Math.random() * dialogs.length)];
+  return {
+    id,
+    peerId: dialog.peerId,
+    text: CHATTER[Math.floor(Math.random() * CHATTER.length)],
+    date: new Date(),
+    outgoing: false,
+    senderId: String(hash(dialog.peerId) % 100000),
+    senderName: PEOPLE[Math.floor(Math.random() * PEOPLE.length)],
+    mediaType: null,
+    mediaName: null,
+  };
 }
 
 export class MockChatSession implements ChatCapableSession {
@@ -258,19 +304,10 @@ export class MockChatSession implements ChatCapableSession {
     // Start the synthetic feed on the first subscriber.
     if (!state.timer) {
       state.timer = setInterval(() => {
-        const dialogs = dialogsFor(this.accountId);
-        const dialog = dialogs[Math.floor(Math.random() * dialogs.length)];
-        const message: ChatMessageDto = {
-          id: state.nextId++,
-          peerId: dialog.peerId,
-          text: CHATTER[Math.floor(Math.random() * CHATTER.length)],
-          date: new Date(),
-          outgoing: false,
-          senderId: String(hash(dialog.peerId) % 100000),
-          senderName: PEOPLE[Math.floor(Math.random() * PEOPLE.length)],
-          mediaType: null,
-          mediaName: null,
-        };
+        const id = state.nextId++;
+        // Two thirds ordinary chatter, one third a promo post in a joined room.
+        const message =
+          (id % 3 === 0 ? promoPost(this.accountId, id) : null) ?? chatterPost(this.accountId, id);
         for (const fn of state.handlers) fn(message);
       }, 15_000);
       // Never keep the process alive just for fake traffic.

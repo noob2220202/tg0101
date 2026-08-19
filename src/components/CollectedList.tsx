@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 
@@ -33,6 +33,9 @@ const TABS: Array<{ status: LinkStatus | "ALL"; label: string }> = [
   { status: "EXCLUDED", label: "제외됨" },
   { status: "ALL", label: "전체" },
 ];
+
+/** How often the screen re-reads the list while collection runs live. */
+const LIVE_REFRESH_MS = 15_000;
 
 const STATUS_TONE: Record<string, "neutral" | "ok" | "bad" | "wait"> = {
   PENDING: "neutral",
@@ -73,6 +76,18 @@ export function CollectedList({
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState(query);
   const [busy, setBusy] = useState(false);
+
+  // Links now land the moment they are posted, so the list is stale within
+  // seconds of loading. Refresh while the tab is in front and idle — a refresh
+  // mid-selection would pull the rows out from under the operator.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (busy || policyOpen || selected.size > 0) return;
+      router.refresh();
+    }, LIVE_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [router, busy, policyOpen, selected.size]);
 
   const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id));
 

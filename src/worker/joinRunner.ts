@@ -186,8 +186,14 @@ export async function runTask(taskId: string): Promise<boolean> {
 
     // 6. Promo-link harvesting for this room.
     if (options.autoCollect) {
-      await collectFromRoom(session, task.job.ownerId, task.targetId, task.target.key, label);
-      await ensureRoomScan(task.accountId, task.targetId);
+      const sweep = await collectFromRoom(
+        session,
+        task.job.ownerId,
+        task.targetId,
+        task.target.key,
+        label,
+      );
+      await ensureRoomScan(task.accountId, task.targetId, sweep.lastMessageId);
     }
 
     await finishTask(
@@ -384,7 +390,21 @@ async function applyRoomSettings(
   }
 }
 
-/** Harvest t.me links advertised in a room we just entered. */
+/** What one sweep of a room produced. */
+export type RoomSweep = {
+  /** Distinct rooms advertised in the messages that were read. */
+  collected: number;
+  /** Highest message id read, so the next sweep can start after it. */
+  lastMessageId: number | null;
+};
+
+/**
+ * Harvest t.me links advertised in a room.
+ *
+ * `minId` makes the read incremental: everything up to that id has already been
+ * accounted for — usually by the live collector — so re-reading it would only
+ * inflate `seenCount` a second time.
+ */
 export async function collectFromRoom(
   session: TelegramSession,
   ownerId: string,
@@ -392,24 +412,31 @@ export async function collectFromRoom(
   key: string,
   label: string,
   limit = 40,
-): Promise<number> {
-  const messages = await session.readMessages(key, limit).catch(() => []);
+  minId: number | null = null,
+): Promise<RoomSweep> {
+  const messages = await session.readMessages(key, limit, { minId }).catch(() => []);
   const seen = new Set<string>();
+  let highest = minId ?? 0;
 
   for (const message of messages) {
-    for (const link of extractLinks(message.text)) {
+    if (message.id > highest) highest = message.id;
+    for (const link of extractLinks(message.text, message.links)) {
       if (link.key === key.toLowerCase() || seen.has(link.key)) continue;
       seen.add(link.key);
       await recordCollectedLink({ ownerId, link, sourceTargetId: targetId, sourceLabel: label });
     }
   }
-  return seen.size;
+  return { collected: seen.size, lastMessageId: highest > 0 ? highest : null };
 }
 
-async function ensureRoomScan(accountId: string, targetId: string): Promise<void> {
+async function ensureRoomScan(
+  accountId: string,
+  targetId: string,
+  lastMessageId: number | null = null,
+): Promise<void> {
   await prisma.roomScan.upsert({
     where: { accountId_targetId: { accountId, targetId } },
-    create: { accountId, targetId, nextScanAt: nextScanTime() },
+    create: { accountId, targetId, lastMessageId, nextScanAt: nextScanTime() },
     update: {},
   });
 }

@@ -2,14 +2,15 @@ import { prisma } from "../lib/db";
 import { getChatSession } from "../lib/telegram";
 import type { ChatMessageDto } from "../lib/telegram/chatTypes";
 import { compileRule, matchRules } from "../lib/keywords";
+import { collectFromLiveMessage } from "../worker/liveCollector";
 
 /**
  * Live update fan-out.
  *
  * One subscription per connected account. Messages are pushed to any listening
- * browser and evaluated against the operator's keyword rules; only rules that
- * match cause a database write, which is what keeps hundreds of promo rooms
- * from filling the disk.
+ * browser, evaluated against the operator's keyword rules, and scanned for
+ * promo links; only rules that match cause a database write, which is what
+ * keeps hundreds of promo rooms from filling the disk.
  */
 
 type Broadcast = (ownerId: string, payload: unknown) => void;
@@ -94,6 +95,10 @@ async function handleMessage(
 
   const hits = await evaluateRules(accountId, ownerId, message);
   broadcast(ownerId, { type: "message", accountId, message, keywordHits: hits });
+
+  // Link collection runs last and detached: it must never delay what the
+  // browser sees, and a collection failure is not worth losing the message for.
+  void collectFromLiveMessage(accountId, ownerId, message).catch(() => {});
 }
 
 /** Record and count any keyword rules the message trips. */
